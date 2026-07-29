@@ -1,13 +1,15 @@
 import { Router } from "express"
 import { AuthRoutes } from "../modules/auth/auth.routes"
+import { CategoryRoutes } from "../modules/category/category.routes"
+import { AdminProductRoutes, ProductRoutes } from "../modules/product/product.routes"
 import { UserRoutes } from "../modules/user/user.routes"
 
 /**
  * Single route registry. Every module registers here and nowhere else.
  *
- * Modules are added as they are built — see §12.6 of ASTANO_REBUILD_SPEC.md for
- * the phase order. Locale is already stripped from the path by resolveLocale,
- * so paths here are language-neutral.
+ * Locale is already stripped from the path by resolveLocale, so paths are
+ * language-neutral: /de/api/v1/products and /api/v1/products reach the same
+ * handler and differ only in req.locale.
  */
 interface ModuleRoute {
 	path: string
@@ -17,8 +19,9 @@ interface ModuleRoute {
 const moduleRoutes: ModuleRoute[] = [
 	{ path: "/auth", route: AuthRoutes },
 	{ path: "/users", route: UserRoutes },
-	// Phase 2: { path: "/products", route: ProductRoutes },
-	// Phase 2: { path: "/categories", route: CategoryRoutes },
+	{ path: "/categories", route: CategoryRoutes },
+	{ path: "/products", route: ProductRoutes },
+	{ path: "/admin/products", route: AdminProductRoutes },
 	// Phase 3: { path: "/cart", route: CartRoutes },
 	// Phase 4: { path: "/quotes", route: QuoteRoutes },
 ]

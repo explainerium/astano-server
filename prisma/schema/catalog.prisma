@@ -1,0 +1,359 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalogue: categories, products, variants, attributes, bundles.
+//
+// THE RULE THAT GOVERNS THIS FILE:
+// Anything that must not differ between languages — sku, stock, weight, moq,
+// quoteEnabled, every price — lives on the base model. Only name, slug,
+// description and meta text live on a *Translation row keyed by locale.
+// Storing a shared field per-language is what let DE and EN drift apart on the
+// old site (spec risk #3).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/// An ADMIN-ONLY label so staff can tell at a glance which products they think
+/// of as main goods and which as add-ons (engraving, coating, packaging).
+///
+/// It changes no behaviour whatsoever. Every product is created the same way,
+/// and this tag must NEVER be serialized to a public endpoint — it exists only
+/// for filtering and sorting inside the dashboard.
+enum ProductKind {
+  MAIN
+  OPTION
+}
+
+/// Where a product is allowed to appear. Mirrors WooCommerce's catalog
+/// visibility so the setting reads the same to the client.
+///
+/// Always the admin's explicit choice — nothing derives or overrides it. In
+/// practice add-ons are set to HIDDEN so they surface only inside the options
+/// list of the product offering them, but that is a decision the admin makes
+/// per product, not a rule the system enforces.
+enum ProductVisibility {
+  SHOP_AND_SEARCH
+  SHOP_ONLY
+  SEARCH_ONLY
+  HIDDEN
+}
+
+model Category {
+  id       String  @id @default(uuid())
+  parentId String?
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+
+  sortOrder Int @default(0)
+
+  /// Hidden categories vanish from every list, filter and menu, and their
+  /// pages return 404 (business rule R13).
+  isHidden Boolean @default(false)
+
+  /// Marks an "… Options" category holding add-ons rather than sellable goods.
+  isOptionCategory Boolean @default(false)
+
+  imageAssetId String?
+  image        Asset?  @relation("CategoryImage", fields: [imageAssetId], references: [id], onDelete: SetNull)
+
+  translations CategoryTranslation[]
+  products     ProductCategory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+  @@index([isHidden])
+  @@map("categories")
+}
+
+model CategoryTranslation {
+  id         String   @id @default(uuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  /// ISO 639-1 code. The set of valid values lives in src/config/locales.ts —
+  /// adding a language needs no migration.
+  locale String
+
+  name        String
+  slug        String
+  description String?
+
+  metaTitle       String?
+  metaDescription String?
+
+  @@unique([categoryId, locale])
+  @@unique([locale, slug])
+  @@map("category_translations")
+}
+
+model Product {
+  id String @id @default(uuid())
+
+  kind   ProductKind   @default(MAIN)
+  status PublishStatus @default(DRAFT)
+
+  /// Catalogue visibility, chosen by the admin. Never derived from `kind`.
+  visibility ProductVisibility @default(SHOP_AND_SEARCH)
+
+  /// Manual ordering within a category listing (WooCommerce "menu order").
+  sortOrder Int @default(0)
+
+  /// "Preis auf Anfrage". When true the price is hidden, add-to-cart is
+  /// blocked, and the product is orderable only through the quote basket (R2).
+  quoteEnabled Boolean @default(false)
+
+  /// Minimum order quantity. One value per product for every customer type,
+  /// identical in all languages, overridable per variant (R3). 0 = disabled.
+  moq Int @default(0)
+
+  featuredAssetId String?
+  featuredAsset   Asset?  @relation("ProductFeatured", fields: [featuredAssetId], references: [id], onDelete: SetNull)
+
+  translations ProductTranslation[]
+  categories   ProductCategory[]
+  variants     ProductVariant[]
+  assets       ProductAsset[]
+  attributes   ProductAttribute[]
+  prices       ProductPrice[]
+  priceTiers   ProductPriceTier[]
+
+  /// Option products offered on this product's page.
+  options ProductOption[] @relation("OptionOwner")
+
+  /// Products that offer THIS product as an option.
+  offeredBy ProductOption[] @relation("OptionProduct")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, kind])
+  @@index([visibility, status])
+  @@index([quoteEnabled])
+  @@map("products")
+}
+
+model ProductTranslation {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  locale String
+
+  name             String
+  slug             String
+  shortDescription String?
+  description      String?
+
+  metaTitle       String?
+  metaDescription String?
+
+  @@unique([productId, locale])
+  @@unique([locale, slug])
+  @@map("product_translations")
+}
+
+model ProductCategory {
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  @@id([productId, categoryId])
+  @@index([categoryId])
+  @@map("product_categories")
+}
+
+/// Every product has at least one variant. A simple product gets a single
+/// `isDefault` variant so stock, SKU and weight always live in one place and
+/// the cart never has to special-case two shapes.
+model ProductVariant {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  sku       String  @unique
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  /// WooCommerce "Enabled" checkbox on a variation. A disabled variant stays in
+  /// the catalogue but cannot be selected or bought.
+  isActive Boolean @default(true)
+
+  /// Overrides the product MOQ when set. Null means inherit (R3).
+  moq Int?
+
+  manageStock       Boolean @default(true)
+  stock             Int     @default(0)
+  allowBackorder    Boolean @default(false)
+  lowStockThreshold Int?
+
+  weightKg Decimal? @db.Decimal(10, 3)
+  lengthCm Decimal? @db.Decimal(10, 2)
+  widthCm  Decimal? @db.Decimal(10, 2)
+  heightCm Decimal? @db.Decimal(10, 2)
+
+  /// Variations carry their own image in WooCommerce; so do these.
+  imageAssetId String?
+  image        Asset?  @relation("VariantImage", fields: [imageAssetId], references: [id], onDelete: SetNull)
+
+  translations    VariantTranslation[]
+  attributeValues VariantAttributeValue[]
+  prices          VariantPrice[]
+  priceTiers      VariantPriceTier[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+  @@index([isActive])
+  @@map("product_variants")
+}
+
+/// WooCommerce variations carry their own description. Name is derived from the
+/// attribute values, so only free text is stored here.
+model VariantTranslation {
+  id        String         @id @default(uuid())
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  locale      String
+  description String?
+
+  @@unique([variantId, locale])
+  @@map("variant_translations")
+}
+
+// ── Attributes ───────────────────────────────────────────────────────────────
+
+model Attribute {
+  id        String  @id @default(uuid())
+  code      String  @unique
+  /// Whether this attribute is used to build variants, or is descriptive only.
+  isVariantAxis Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  translations AttributeTranslation[]
+  values       AttributeValue[]
+  products     ProductAttribute[]
+
+  @@map("attributes")
+}
+
+model AttributeTranslation {
+  id          String    @id @default(uuid())
+  attributeId String
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  locale String
+  name   String
+
+  @@unique([attributeId, locale])
+  @@map("attribute_translations")
+}
+
+model AttributeValue {
+  id          String    @id @default(uuid())
+  attributeId String
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  code      String
+  sortOrder Int    @default(0)
+
+  translations AttributeValueTranslation[]
+  variants     VariantAttributeValue[]
+  products     ProductAttribute[]
+
+  @@unique([attributeId, code])
+  @@map("attribute_values")
+}
+
+model AttributeValueTranslation {
+  id               String         @id @default(uuid())
+  attributeValueId String
+  attributeValue   AttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
+
+  locale String
+  label  String
+
+  @@unique([attributeValueId, locale])
+  @@map("attribute_value_translations")
+}
+
+/// Descriptive attributes shown on the product page. `isVisible` reproduces the
+/// per-attribute show/hide control the old site had on the Additional
+/// Information tab (§7.2).
+model ProductAttribute {
+  productId        String
+  product          Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attributeId      String
+  attribute        Attribute      @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  attributeValueId String
+  attributeValue   AttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
+
+  isVisible Boolean @default(true)
+
+  @@id([productId, attributeId, attributeValueId])
+  @@index([attributeId])
+  @@map("product_attributes")
+}
+
+model VariantAttributeValue {
+  variantId        String
+  variant          ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  attributeValueId String
+  attributeValue   AttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
+
+  @@id([variantId, attributeValueId])
+  @@index([attributeValueId])
+  @@map("variant_attribute_values")
+}
+
+// ── Product options (the configurator, §4.6) ─────────────────────────────────
+
+/// Attaches an option product directly to the product that offers it.
+///
+/// WordPress required creating a "bundle" entity first and then assigning it to
+/// a product — two steps for one idea. Here the admin opens a product, sees the
+/// list of OPTION products, and ticks as many as they want. No intermediate
+/// object exists, so nothing can be orphaned or half-configured.
+///
+/// This is not an upsell mechanism: for bespoke goods it is the only way to
+/// order engraving, coating, alloy or packaging. Each selected option becomes
+/// its own order line with its own SKU, MOQ and tier ladder.
+model ProductOption {
+  id String @id @default(uuid())
+
+  /// The product whose page shows this option.
+  productId String
+  product   Product @relation("OptionOwner", fields: [productId], references: [id], onDelete: Cascade)
+
+  /// The option product being offered. Any product may be attached as an
+  /// option — the `kind` label is a dashboard aid, not a constraint.
+  optionProductId String
+  optionProduct   Product @relation("OptionProduct", fields: [optionProductId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  /// Optional heading to group options on the page ("Coating", "Packaging").
+  /// Free text rather than an entity — grouping is presentation, not structure.
+  groupLabel String?
+
+  /// Options start unselected and their quantity starts at their own MOQ, not
+  /// at 1 (§4.6). Stored as a default so an admin can override per line.
+  preselected Boolean @default(false)
+
+  /// Optional extra discount for taking the option with the main product.
+  discountPercent Decimal? @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now())
+
+  @@unique([productId, optionProductId])
+  @@index([optionProductId])
+  @@map("product_options")
+}

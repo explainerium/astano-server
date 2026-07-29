@@ -4,7 +4,7 @@
   "description": "Astano backend — Express 5 + Prisma + PostgreSQL, modular, multi-locale (en primary, de secondary).",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch --include \"src/i18n/messages/*.json\" src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",

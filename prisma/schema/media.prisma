@@ -1,0 +1,94 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Media library. Files live in Cloudflare R2; only metadata is stored here.
+//
+// Two buckets, two policies (§12.3):
+//   PUBLIC  product images        — derivatives generated with sharp on upload
+//   PRIVATE customer design files — signed owner-or-admin URLs only
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AssetVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+/// Folders for the admin media library. The old site organised 1,700+ images
+/// into 37 folders and the client navigates by them, so this is a real feature
+/// rather than decoration (§7.1, §9.6).
+model MediaFolder {
+  id       String  @id @default(uuid())
+  parentId String?
+  parent   MediaFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children MediaFolder[] @relation("FolderTree")
+
+  name      String
+  sortOrder Int    @default(0)
+
+  assets Asset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+  @@map("media_folders")
+}
+
+model Asset {
+  id String @id @default(uuid())
+
+  /// Object key in R2. The bucket is implied by `visibility`.
+  storageKey String          @unique
+  visibility AssetVisibility @default(PUBLIC)
+
+  mimeType     String
+  sizeBytes    Int
+  width        Int?
+  height       Int?
+  originalName String
+
+  /// Derivative sizes generated at upload, as { name: storageKey }. R2 has no
+  /// transformation layer, so these are produced by sharp rather than on the fly.
+  derivatives Json?
+
+  folderId String?
+  folder   MediaFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  translations     AssetTranslation[]
+  products         ProductAsset[]
+  featuredFor      Product[]        @relation("ProductFeatured")
+  categoryImageFor Category[]       @relation("CategoryImage")
+  variantImageFor  ProductVariant[] @relation("VariantImage")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([folderId])
+  @@index([visibility])
+  @@map("assets")
+}
+
+/// Only alt text and caption are translated — the binary is language-neutral.
+model AssetTranslation {
+  id      String @id @default(uuid())
+  assetId String
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  locale  String
+  alt     String?
+  caption String?
+
+  @@unique([assetId, locale])
+  @@map("asset_translations")
+}
+
+model ProductAsset {
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  @@id([productId, assetId])
+  @@index([assetId])
+  @@map("product_assets")
+}
