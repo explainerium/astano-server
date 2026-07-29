@@ -6,5 +6,26 @@
 	"common.unauthorized": "Bitte melden Sie sich an.",
 	"common.forbidden": "Sie haben dafür keine Berechtigung.",
 	"common.tooManyRequests": "Zu viele Anfragen. Bitte versuchen Sie es in Kürze erneut.",
-	"route.notFound": "Die Route {path} existiert nicht."
+	"route.notFound": "Die Route {path} existiert nicht.",
+
+	"auth.registered": "Ihr Konto wurde erstellt.",
+	"auth.loggedIn": "Erfolgreich angemeldet.",
+	"auth.loggedOut": "Erfolgreich abgemeldet.",
+	"auth.refreshed": "Sitzung erneuert.",
+	"auth.required": "Anmeldung erforderlich.",
+	"auth.invalidToken": "Ihre Sitzung ist ungültig oder abgelaufen. Bitte melden Sie sich erneut an.",
+	"auth.invalidCredentials": "E-Mail-Adresse oder Passwort ist ungültig.",
+	"auth.emailTaken": "Es existiert bereits ein Konto mit dieser E-Mail-Adresse.",
+	"auth.userNotFound": "Benutzer nicht gefunden.",
+	"auth.pending": "Ihr Konto wartet auf Freigabe.",
+	"auth.rejected": "Dieses Konto wurde abgelehnt.",
+	"auth.resetSent": "Falls ein Konto zu dieser Adresse existiert, wurde ein Link zum Zurücksetzen gesendet.",
+	"auth.passwordReset": "Ihr Passwort wurde zurückgesetzt. Bitte melden Sie sich an.",
+	"auth.passwordChanged": "Ihr Passwort wurde geändert.",
+	"auth.invalidResetToken": "Dieser Link zum Zurücksetzen ist ungültig oder abgelaufen.",
+
+	"user.approved": "Konto freigegeben.",
+	"user.rejected": "Konto abgelehnt.",
+	"user.roleUpdated": "Rolle aktualisiert.",
+	"user.alreadyActive": "Dieses Konto ist bereits aktiv."
 }

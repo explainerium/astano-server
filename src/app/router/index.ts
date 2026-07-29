@@ -1,4 +1,6 @@
 import { Router } from "express"
+import { AuthRoutes } from "../modules/auth/auth.routes"
+import { UserRoutes } from "../modules/user/user.routes"
 
 /**
  * Single route registry. Every module registers here and nowhere else.
@@ -13,6 +15,8 @@ interface ModuleRoute {
 }
 
 const moduleRoutes: ModuleRoute[] = [
+	{ path: "/auth", route: AuthRoutes },
+	{ path: "/users", route: UserRoutes },
 	// Phase 2: { path: "/products", route: ProductRoutes },
 	// Phase 2: { path: "/categories", route: CategoryRoutes },
 	// Phase 3: { path: "/cart", route: CartRoutes },

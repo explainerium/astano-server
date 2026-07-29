@@ -1,0 +1,102 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Users, roles and authentication.
+// Source of truth: ASTANO_REBUILD_SPEC.md §2.6 (roles), §4.1 (B2B mode),
+// §4.4 (registration flow), risk #12 (password migration).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The five roles that exist. Deliberately flat — this shop has exactly one
+/// B2B tier, so a capability matrix would be machinery without a purpose.
+///
+/// GUEST is never stored on a User row. It exists because resolvePrice() takes
+/// a role for every request, including anonymous ones, and guests get their own
+/// tier ladder (§4.2). The old site modelled it the same way (`wholesalex_guest`).
+enum UserRole {
+  GUEST
+  B2C
+  RESELLER
+  SHOP_MANAGER
+  ADMIN
+}
+
+/// Separate from role. Every B2B registration is manually approved
+/// (`_settings_user_status_option = admin_approve`), so a RESELLER can exist
+/// as PENDING. Auth guards must always check both.
+enum UserStatus {
+  ACTIVE
+  PENDING
+  REJECTED
+}
+
+model User {
+  id String @id @default(uuid())
+
+  email        String @unique
+  passwordHash String
+
+  role   UserRole   @default(B2C)
+  status UserStatus @default(ACTIVE)
+
+  // Profile. The dealer-registration form collects more than this (§4.4);
+  // those extra fields land with the b2bApplication module in Phase 6.
+  firstName String?
+  lastName  String?
+  company   String?
+  phone     String?
+  vatNumber String?
+
+  /// Preferred locale, e.g. "en" or "de". Drives email language.
+  locale String @default("en")
+
+  /// True once an EU VAT number has been validated against VIES.
+  /// Reverse charge depends on this, so it is never inferred at request time.
+  vatValidated   Boolean   @default(false)
+  vatValidatedAt DateTime?
+
+  lastLoginAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([role, status])
+  @@map("users")
+}
+
+/// Refresh tokens are stored hashed, never in plaintext — a leaked database
+/// must not hand out working sessions. One row per active device.
+model RefreshToken {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  userAgent String?
+  ipAddress String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}

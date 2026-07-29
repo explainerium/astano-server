@@ -6,5 +6,26 @@
 	"common.unauthorized": "You need to sign in to do that.",
 	"common.forbidden": "You do not have permission to do that.",
 	"common.tooManyRequests": "Too many requests. Please try again shortly.",
-	"route.notFound": "The route {path} does not exist."
+	"route.notFound": "The route {path} does not exist.",
+
+	"auth.registered": "Your account has been created.",
+	"auth.loggedIn": "Signed in successfully.",
+	"auth.loggedOut": "Signed out successfully.",
+	"auth.refreshed": "Session refreshed.",
+	"auth.required": "Authentication required.",
+	"auth.invalidToken": "Your session is invalid or has expired. Please sign in again.",
+	"auth.invalidCredentials": "Invalid email or password.",
+	"auth.emailTaken": "An account with this email address already exists.",
+	"auth.userNotFound": "User not found.",
+	"auth.pending": "Your account is awaiting approval.",
+	"auth.rejected": "This account has been rejected.",
+	"auth.resetSent": "If an account exists for that address, a reset link has been sent.",
+	"auth.passwordReset": "Your password has been reset. Please sign in.",
+	"auth.passwordChanged": "Your password has been changed.",
+	"auth.invalidResetToken": "This reset link is invalid or has expired.",
+
+	"user.approved": "Account approved.",
+	"user.rejected": "Account rejected.",
+	"user.roleUpdated": "Role updated.",
+	"user.alreadyActive": "This account is already active."
 }
