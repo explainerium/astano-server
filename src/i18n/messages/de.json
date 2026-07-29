@@ -1,0 +1,10 @@
+{
+	"common.ok": "OK",
+	"common.notFound": "Nicht gefunden",
+	"common.serverError": "Bei uns ist etwas schiefgelaufen.",
+	"common.validationFailed": "Die übermittelten Daten sind ungültig.",
+	"common.unauthorized": "Bitte melden Sie sich an.",
+	"common.forbidden": "Sie haben dafür keine Berechtigung.",
+	"common.tooManyRequests": "Zu viele Anfragen. Bitte versuchen Sie es in Kürze erneut.",
+	"route.notFound": "Die Route {path} existiert nicht."
+}

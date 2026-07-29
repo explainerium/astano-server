@@ -1,0 +1,21 @@
+// Datasource + generator only. Models live in sibling files in this folder —
+// Prisma 7 merges every .prisma file under prisma/schema/ automatically.
+//
+//   user.prisma      catalog.prisma   i18n.prisma      pricing.prisma
+//   cart.prisma      order.prisma     quote.prisma     shipping.prisma
+//   tax.prisma       media.prisma
+//
+// The relational design is specified in §2.7 of ASTANO_REBUILD_SPEC.md.
+// Rule that governs the whole schema: fields that must NOT differ between
+// languages (sku, price, stock, weight, moq, quoteEnabled) live on the base
+// model. Only name/slug/description/meta live on a *Translation model, keyed
+// by locale. This is what prevents the DE/EN drift that broke the old site.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}

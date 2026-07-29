@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"lib": ["ES2023"],
+		"module": "node16",
+		"moduleResolution": "node16",
+		"rootDir": "./src",
+		"outDir": "./dist",
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noImplicitOverride": true,
+		"skipLibCheck": true,
+		"resolveJsonModule": true,
+		"sourceMap": true,
+		"declaration": false
+	},
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "dist", "tests"]
+}

@@ -1,0 +1,10 @@
+{
+	"common.ok": "OK",
+	"common.notFound": "Not found",
+	"common.serverError": "Something went wrong on our side.",
+	"common.validationFailed": "The submitted data is not valid.",
+	"common.unauthorized": "You need to sign in to do that.",
+	"common.forbidden": "You do not have permission to do that.",
+	"common.tooManyRequests": "Too many requests. Please try again shortly.",
+	"route.notFound": "The route {path} does not exist."
+}
