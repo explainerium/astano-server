@@ -1,0 +1,116 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Contact messages, newsletter subscriptions and wishlists.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Contact form submissions.
+///
+/// Stored as well as emailed. If SMTP is down or a message lands in a spam
+/// folder, an enquiry from a potential customer is simply lost — and nobody
+/// finds out. The row is the safety net.
+model ContactMessage {
+  id String @id @default(uuid())
+
+  name    String
+  email   String
+  phone   String?
+  company String?
+  subject String?
+  message String
+
+  locale String @default("en")
+
+  /// Set when a signed-in customer writes; null for a visitor.
+  userId String?
+
+  /// Useful when a message turns out to be abuse.
+  ipAddress String?
+
+  handledAt     DateTime?
+  handledBy     String?
+  internalNote  String?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([handledAt])
+  @@map("contact_messages")
+}
+
+enum SubscriptionStatus {
+  /// Signed up, confirmation email sent, not yet confirmed.
+  PENDING
+  CONFIRMED
+  UNSUBSCRIBED
+}
+
+/// Newsletter subscribers, with double opt-in.
+///
+/// German law (UWG §7) requires confirmed consent before sending marketing
+/// email, so a subscription is worthless until the recipient clicks the link.
+/// Recording `confirmedAt` is also the evidence if consent is ever challenged.
+model NewsletterSubscriber {
+  id    String @id @default(uuid())
+  email String @unique
+
+  status SubscriptionStatus @default(PENDING)
+  locale String             @default("en")
+
+  name String?
+
+  /// Hashed, like every other token here — the raw value lives only in the
+  /// confirmation email.
+  confirmTokenHash String? @unique
+  confirmSentAt    DateTime?
+  confirmedAt      DateTime?
+  unsubscribedAt   DateTime?
+
+  /// Lets an unsubscribe link work without a login.
+  unsubscribeTokenHash String? @unique
+
+  /// Where they signed up — footer, checkout, a campaign.
+  source String?
+
+  /// Whether the address has been pushed to CleverReach yet.
+  syncedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@map("newsletter_subscribers")
+}
+
+/// A saved list of products. Guests get one too — the old shop allowed it
+/// (`wishlist_logged = 0`), and losing a list at the moment someone registers
+/// is a poor way to welcome them.
+model Wishlist {
+  id String @id @default(uuid())
+
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token String? @unique
+
+  items WishlistItem[]
+
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id         String   @id @default(uuid())
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([wishlistId, variantId])
+  @@index([wishlistId])
+  @@map("wishlist_items")
+}

@@ -57,10 +57,13 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  addresses           Address[]
+  b2bApplication      B2bApplication?
   carts               Cart[]
   orders              Order[]
   quoteBaskets        QuoteBasket[]
   quoteRequests       QuoteRequest[]
+  wishlist            Wishlist?
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
 

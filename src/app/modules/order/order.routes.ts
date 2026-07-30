@@ -1,5 +1,6 @@
 import { Router } from "express"
 import { auth } from "../../middlewares/auth"
+import { writeLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { InvoiceController } from "../invoice/invoice.controller"
 import { OrderController } from "./order.controller"
@@ -20,7 +21,7 @@ CheckoutRoutes.post(
 	OrderController.preview
 )
 
-CheckoutRoutes.post("/", validateRequest(OrderValidation.placeOrderSchema), OrderController.place)
+CheckoutRoutes.post("/", writeLimiter, validateRequest(OrderValidation.placeOrderSchema), OrderController.place)
 
 /** A customer's own order history. */
 export const OrderRoutes = Router()

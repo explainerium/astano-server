@@ -7,6 +7,7 @@ import { prisma } from "../../../shared/prisma"
 import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import { auth } from "../../middlewares/auth"
+import { externalLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
 
 const schema = z.object({
@@ -26,6 +27,7 @@ const router = Router()
 router.post(
 	"/validate",
 	auth(),
+	externalLimiter,
 	validateRequest(schema),
 	catchAsync(async (req, res) => {
 		const result = await validateVatNumber(req.body.vatNumber)

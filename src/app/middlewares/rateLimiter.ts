@@ -1,0 +1,34 @@
+import rateLimit from "express-rate-limit"
+
+/**
+ * Rate limits for the endpoints that do real work on someone else's behalf.
+ *
+ * Credential endpoints have their own tighter limit in auth.routes.ts. These
+ * cover the rest: placing orders, submitting quotes, and calling VIES — the
+ * last especially, because that is the European Commission's service to abuse,
+ * not ours.
+ *
+ * express-rate-limit v8 API. Do not copy a v7 config into this.
+ */
+const make = (limit: number, windowMs: number, message: string) =>
+	rateLimit({
+		windowMs,
+		limit,
+		standardHeaders: "draft-7",
+		legacyHeaders: false,
+		message: { success: false, statusCode: 429, message },
+	})
+
+/** Checkout and quote submission: generous for a human, useless for a script. */
+export const writeLimiter = make(
+	30,
+	15 * 60 * 1000,
+	"Too many requests. Please slow down and try again shortly."
+)
+
+/** VIES is a third-party service — this protects them as much as us. */
+export const externalLimiter = make(
+	10,
+	15 * 60 * 1000,
+	"Too many validation attempts. Please try again later."
+)

@@ -1,4 +1,9 @@
 import { Router } from "express"
+import { AccountRoutes } from "../modules/account/account.routes"
+import { AdminB2bRoutes, B2bRoutes } from "../modules/b2bApplication/b2bApplication.routes"
+import { AdminContactRoutes, ContactRoutes } from "../modules/contact/contact.routes"
+import { AdminNewsletterRoutes, NewsletterRoutes } from "../modules/newsletter/newsletter.routes"
+import { WishlistRoutes } from "../modules/wishlist/wishlist.routes"
 import { AttributeRoutes } from "../modules/attribute/attribute.routes"
 import { AuthRoutes } from "../modules/auth/auth.routes"
 import { BundleRoutes } from "../modules/bundle/bundle.routes"
@@ -31,6 +36,9 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/auth", route: AuthRoutes },
 	{ path: "/users", route: UserRoutes },
 	{ path: "/vat", route: VatRoutes },
+	{ path: "/account", route: AccountRoutes },
+	{ path: "/b2b", route: B2bRoutes },
+	{ path: "/admin/b2b", route: AdminB2bRoutes },
 	{ path: "/settings", route: SettingRoutes },
 	{ path: "/categories", route: CategoryRoutes },
 	{ path: "/attributes", route: AttributeRoutes },
@@ -47,6 +55,11 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/admin/orders", route: AdminOrderRoutes },
 	{ path: "/quotes", route: QuoteRoutes },
 	{ path: "/admin/quotes", route: AdminQuoteRoutes },
+	{ path: "/wishlist", route: WishlistRoutes },
+	{ path: "/contact", route: ContactRoutes },
+	{ path: "/admin/contact", route: AdminContactRoutes },
+	{ path: "/newsletter", route: NewsletterRoutes },
+	{ path: "/admin/newsletter", route: AdminNewsletterRoutes },
 ]
 
 const router = Router()

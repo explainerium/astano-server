@@ -3,6 +3,7 @@ import app from "./app"
 import { env } from "./config"
 import { logger } from "./shared/logger"
 import { InvoiceService } from "./app/modules/invoice/invoice.service"
+import { startJobs, stopJobs } from "./jobs"
 
 let server: Server
 
@@ -10,12 +11,14 @@ const bootstrap = (): void => {
 	server = app.listen(env.PORT, () => {
 		logger.info(`Astano API listening on http://localhost:${env.PORT}`)
 		logger.info(`Health check:  http://localhost:${env.PORT}/health`)
+		startJobs()
 	})
 }
 
 const shutdown = (signal: string): void => {
 	logger.info(`${signal} received — shutting down`)
 	// Chromium outlives the node process unless it is told otherwise.
+	stopJobs()
 	void InvoiceService.closeBrowser()
 	if (server) {
 		server.close(() => process.exit(0))

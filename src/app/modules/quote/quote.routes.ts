@@ -1,9 +1,11 @@
 import { Router } from "express"
 import { auth } from "../../middlewares/auth"
 import { optionalAuth } from "../../middlewares/optionalAuth"
+import { writeLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { QuoteController } from "./quote.controller"
 import { QuoteValidation } from "./quote.validation"
+import { QuoteConvertRoutes } from "./quoteConvert.routes"
 
 /**
  * The inquiry basket and quote threads.
@@ -23,7 +25,10 @@ QuoteRoutes.patch("/basket/items/:id", validateRequest(QuoteValidation.updateIte
 QuoteRoutes.delete("/basket/items/:id", validateRequest(QuoteValidation.itemIdSchema), QuoteController.removeItem)
 QuoteRoutes.delete("/basket", QuoteController.clearBasket)
 
-QuoteRoutes.post("/basket/submit", validateRequest(QuoteValidation.submitSchema), QuoteController.submit)
+QuoteRoutes.post("/basket/submit", writeLimiter, validateRequest(QuoteValidation.submitSchema), QuoteController.submit)
+
+// Accepting a quote turns it into an order.
+QuoteRoutes.use("/", QuoteConvertRoutes)
 
 // ── guest access by emailed token ────────────────────────────────────────────
 QuoteRoutes.get("/by-token", QuoteController.getByToken)

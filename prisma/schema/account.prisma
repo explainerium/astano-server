@@ -1,0 +1,94 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Customer account: saved addresses and the dealer application.
+//
+// Addresses here are the customer's ADDRESS BOOK, not the addresses on an
+// order. Orders copy theirs in at checkout (see order.prisma) precisely so that
+// editing an entry here can never rewrite where a past order was sent.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Address {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// What the customer calls it — "Office", "Warehouse", "Home".
+  label String?
+
+  firstName String
+  lastName  String
+  company   String?
+  street1   String
+  street2   String?
+  city      String
+  state     String?
+  postcode  String
+  /// ISO 3166-1 alpha-2, never a display name.
+  countryCode String
+  phone       String?
+  email       String?
+
+  /// A customer may keep separate defaults for invoicing and delivery — a
+  /// dealer billing head office and shipping to a workshop is the normal case
+  /// here, not the exception.
+  isDefaultBilling  Boolean @default(false)
+  isDefaultShipping Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("addresses")
+}
+
+/// A dealer registration, held alongside the user account it created.
+///
+/// The account is created immediately as RESELLER/PENDING so the applicant can
+/// sign in and watch their status, but rule R5b prices them as a guest until an
+/// admin approves — registering must not itself unlock wholesale prices.
+model B2bApplication {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // ── Business ──────────────────────────────────────────────────────────────
+  companyName    String
+  vatNumber      String?
+  registerNumber String?
+  foundingDate   DateTime?
+  website        String?
+  businessType   String?
+  /// Free text — "roughly 5,000 units a year". Deliberately not a number: the
+  /// old form collected a range, and a forced number invites made-up precision.
+  expectedVolume String?
+  /// Trade-association membership, which the old dealer form asked about.
+  psiMember Boolean @default(false)
+
+  // ── Address ───────────────────────────────────────────────────────────────
+  street      String
+  street2     String?
+  postcode    String
+  city        String
+  countryCode String
+
+  // ── Contact ───────────────────────────────────────────────────────────────
+  salutation String?
+  firstName  String
+  lastName   String
+  phone      String?
+
+  message String?
+
+  // ── Review ────────────────────────────────────────────────────────────────
+  /// Decision state lives on the User (`status`), so there is exactly one
+  /// source of truth for whether wholesale prices apply. These record only who
+  /// decided and why.
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  reviewNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@map("b2b_applications")
+}
