@@ -1,0 +1,67 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Shopping cart.
+//
+// A cart belongs either to a signed-in user or to an anonymous visitor holding
+// a token. Both exist because the shop must let a guest fill a basket before
+// deciding to register — checkout then requires an account (rule R7), and the
+// guest cart merges into theirs on sign-in rather than being thrown away.
+//
+// ⚠️ NO PRICE IS STORED HERE. Prices are resolved on every read through
+// resolvePrice(), because they depend on (role, quantity) and a customer's role
+// can change underneath a cart — a Reseller approved overnight must see
+// wholesale prices on the basket they filled yesterday. Freezing a price at
+// add-to-cart time is how a shop ends up honouring the wrong one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Cart {
+  id String @id @default(uuid())
+
+  /// Set once the owner signs in. Null for an anonymous cart.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Opaque token held by an anonymous visitor in an httpOnly cookie.
+  /// Cleared when the cart is claimed by a user.
+  token String? @unique
+
+  items CartItem[]
+
+  /// Abandoned anonymous carts are swept by a scheduled job.
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("carts")
+}
+
+model CartItem {
+  id     String @id @default(uuid())
+  cartId String
+  cart   Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  quantity Int
+
+  /// Set on lines added as an option alongside a main product (§4.6).
+  /// Removing the parent removes its options; the configurator in Phase 5
+  /// relies on this, and the cart already honours it.
+  parentItemId String?
+  parentItem   CartItem?  @relation("OptionLines", fields: [parentItemId], references: [id], onDelete: Cascade)
+  optionLines  CartItem[] @relation("OptionLines")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Deliberately no unique constraint on (cartId, variantId): option lines can
+  // legitimately repeat the same variant under different parents, and a
+  // nullable column inside a composite unique index constrains nothing in
+  // PostgreSQL anyway. Merging duplicate lines is done in the service.
+  @@index([cartId])
+  @@index([variantId])
+  @@index([parentItemId])
+  @@map("cart_items")
+}

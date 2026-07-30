@@ -1,0 +1,25 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Store settings — admin-managed key/value.
+//
+// Company name, address, VAT id, register number, invoice footer, support
+// email. These appear on every invoice and every transactional email, so they
+// cannot live in environment variables that only a developer can change.
+//
+// Values are JSON so a setting can hold a string, a number or a small object
+// without a migration each time the client wants another field on the invoice.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Setting {
+  /// Dotted key, e.g. "company.name" or "invoice.footer".
+  key String @id
+
+  value Json
+
+  /// Marks settings safe to expose on public endpoints (support email, shop
+  /// name). Anything not flagged is staff-only by default.
+  isPublic Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}

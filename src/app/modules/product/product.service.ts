@@ -7,6 +7,7 @@ import {
 	type RolePriceInput,
 } from "../../../domain/pricing/resolvePrice"
 import { getEffectiveMoq } from "../../../domain/moq/getEffectiveMoq"
+import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { slugify, uniqueSlug } from "../../../shared/slugify"
@@ -42,6 +43,29 @@ const detailInclude = {
 } satisfies Prisma.ProductInclude
 
 type ProductDetail = Prisma.ProductGetPayload<{ include: typeof detailInclude }>
+
+/**
+ * Images leave the API as ready-to-use URLs, never storage keys. The frontend
+ * must not have to know which bucket or CDN is behind them — that is exactly
+ * the coupling the storage driver exists to prevent.
+ */
+const toImage = (
+	asset: { id: string; storageKey: string; derivatives: unknown; width: number | null; height: number | null } | null
+) => {
+	if (!asset) return null
+
+	const derivatives = (asset.derivatives ?? {}) as Record<string, string>
+
+	return {
+		id: asset.id,
+		url: storage.publicUrl(asset.storageKey),
+		width: asset.width,
+		height: asset.height,
+		srcset: Object.fromEntries(
+			Object.entries(derivatives).map(([name, key]) => [name, storage.publicUrl(key)])
+		),
+	}
+}
 
 const pickTranslation = <T extends { locale: string }>(rows: T[], locale: LocaleCode): T | undefined =>
 	rows.find((r) => r.locale === locale) ??
@@ -101,10 +125,8 @@ const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRo
 		quoteOnly: row.quoteEnabled,
 		moq: row.moq,
 
-		featuredImage: row.featuredAsset
-			? { id: row.featuredAsset.id, key: row.featuredAsset.storageKey }
-			: null,
-		images: row.assets.map((a) => ({ id: a.asset.id, key: a.asset.storageKey })),
+		featuredImage: toImage(row.featuredAsset),
+		images: row.assets.map((a) => toImage(a.asset)).filter(Boolean),
 
 		categories: row.categories
 			.filter((c) => !c.category.isHidden)
@@ -138,7 +160,7 @@ const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRo
 					inStock: !v.manageStock || v.stock > 0 || v.allowBackorder,
 					stock: v.manageStock ? v.stock : null,
 					weightKg: v.weightKg?.toString() ?? null,
-					image: v.image ? { id: v.image.id, key: v.image.storageKey } : null,
+					image: toImage(v.image),
 					attributes: v.attributeValues.map((av) => ({
 						id: av.attributeValue.id,
 						label: pickTranslation(av.attributeValue.translations, locale)?.label ?? av.attributeValue.code,
@@ -188,9 +210,7 @@ const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRo
 				moq: optionMoq,
 				startQuantity: optionMoq > 0 ? optionMoq : 1,
 				discountPercent: o.discountPercent?.toString() ?? null,
-				image: o.optionProduct.featuredAsset
-					? { id: o.optionProduct.featuredAsset.id, key: o.optionProduct.featuredAsset.storageKey }
-					: null,
+				image: toImage(o.optionProduct.featuredAsset),
 				unitPrice:
 					resolvePrice({
 						quoteEnabled: o.optionProduct.quoteEnabled,

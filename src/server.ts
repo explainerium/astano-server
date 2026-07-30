@@ -2,6 +2,7 @@ import type { Server } from "http"
 import app from "./app"
 import { env } from "./config"
 import { logger } from "./shared/logger"
+import { InvoiceService } from "./app/modules/invoice/invoice.service"
 
 let server: Server
 
@@ -14,6 +15,8 @@ const bootstrap = (): void => {
 
 const shutdown = (signal: string): void => {
 	logger.info(`${signal} received — shutting down`)
+	// Chromium outlives the node process unless it is told otherwise.
+	void InvoiceService.closeBrowser()
 	if (server) {
 		server.close(() => process.exit(0))
 	} else {

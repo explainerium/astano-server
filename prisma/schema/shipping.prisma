@@ -1,0 +1,125 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Shipping. Entirely admin-managed: zones, methods and every rate band are
+// created through the API. No zone or price is seeded.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ShippingMethodType {
+  /// Cost looked up from weight bands (the old shop's arrangement).
+  WEIGHT_BANDED
+  /// One cost per order, whatever the weight.
+  FLAT_RATE
+  /// No charge, optionally above an order-value threshold.
+  FREE_SHIPPING
+  /// Cost looked up from order-value bands.
+  PRICE_BANDED
+}
+
+model ShippingZone {
+  id String @id @default(uuid())
+
+  code      String  @unique
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  translations ShippingZoneTranslation[]
+  countries    ShippingZoneCountry[]
+  methods      ShippingMethod[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("shipping_zones")
+}
+
+model ShippingZoneTranslation {
+  id     String       @id @default(uuid())
+  zoneId String
+  zone   ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  locale String
+  name   String
+
+  @@unique([zoneId, locale])
+  @@map("shipping_zone_translations")
+}
+
+/// A country belongs to at most one zone, so a destination always resolves to
+/// exactly one — overlapping zones would make the cheapest-match arbitrary.
+model ShippingZoneCountry {
+  id     String       @id @default(uuid())
+  zoneId String
+  zone   ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  /// ISO 3166-1 alpha-2.
+  countryCode String @unique
+
+  @@index([zoneId])
+  @@map("shipping_zone_countries")
+}
+
+model ShippingMethod {
+  id     String       @id @default(uuid())
+  zoneId String
+  zone   ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  code String
+  type ShippingMethodType @default(WEIGHT_BANDED)
+
+  /// Used by FLAT_RATE.
+  flatCost Decimal? @db.Decimal(12, 4)
+
+  /// Used by FREE_SHIPPING — null means always free.
+  freeAboveSubtotal Decimal? @db.Decimal(12, 4)
+
+  /// Whether tax applies to the shipping charge. The old shop taxed EU
+  /// shipping but not the Swiss rate; that is a per-method admin choice.
+  taxable Boolean @default(true)
+
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  translations ShippingMethodTranslation[]
+  rates        ShippingRate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([zoneId, code])
+  @@map("shipping_methods")
+}
+
+model ShippingMethodTranslation {
+  id       String         @id @default(uuid())
+  methodId String
+  method   ShippingMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
+
+  locale      String
+  name        String
+  description String?
+
+  @@unique([methodId, locale])
+  @@map("shipping_method_translations")
+}
+
+/// One band of a ladder. Interpreted as half-open — `min <= value < max` — so
+/// adjacent bands cannot both match a boundary value. The old shop had exactly
+/// that bug at 320 kg, where two rules claimed the same weight.
+model ShippingRate {
+  id       String         @id @default(uuid())
+  methodId String
+  method   ShippingMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
+
+  /// Weight in kg for WEIGHT_BANDED, order subtotal for PRICE_BANDED.
+  minValue Decimal  @db.Decimal(12, 4)
+  /// Null means open-ended — the top band.
+  maxValue Decimal? @db.Decimal(12, 4)
+
+  cost Decimal @db.Decimal(12, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([methodId, minValue])
+  @@index([methodId])
+  @@map("shipping_rates")
+}

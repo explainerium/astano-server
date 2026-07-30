@@ -1,0 +1,77 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Tax. Entirely admin-managed — no rate, country or rule is hardcoded anywhere.
+//
+// The old shop's arrangement (19% across the EU, 0% for Switzerland, reverse
+// charge on a validated VAT ID) is expressible here, but only because an admin
+// enters it. Nothing in the code assumes it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Groups rates so different goods can be taxed differently — standard,
+/// reduced, zero-rated. Products point at a class; a product with none uses
+/// the class marked `isDefault`.
+model TaxClass {
+  id   String @id @default(uuid())
+  code String @unique
+
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  translations TaxClassTranslation[]
+  rates        TaxRate[]
+  products     Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tax_classes")
+}
+
+model TaxClassTranslation {
+  id         String   @id @default(uuid())
+  taxClassId String
+  taxClass   TaxClass @relation(fields: [taxClassId], references: [id], onDelete: Cascade)
+
+  locale String
+  name   String
+
+  @@unique([taxClassId, locale])
+  @@map("tax_class_translations")
+}
+
+model TaxRate {
+  id         String   @id @default(uuid())
+  taxClassId String
+  taxClass   TaxClass @relation(fields: [taxClassId], references: [id], onDelete: Cascade)
+
+  /// ISO 3166-1 alpha-2. Never a display name — the old site stored country
+  /// *labels* in a checkout field and broke both tax and shipping resolution.
+  countryCode String
+
+  /// Optional narrowing to a region within the country.
+  state String?
+
+  /// Label shown on the invoice line, e.g. "Steuer" or "VAT".
+  name String
+
+  /// Percentage, e.g. 19.0000.
+  rate Decimal @db.Decimal(9, 4)
+
+  /// Whether shipping is taxed at this rate too.
+  appliesToShipping Boolean @default(true)
+
+  /// Lower runs first when several rates match.
+  priority Int @default(1)
+
+  /// When true, a customer in this country with a validated VAT ID pays 0%
+  /// (EU reverse charge). Admin decides per rate; the code does not assume it.
+  reverseChargeWithVatId Boolean @default(false)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([taxClassId, countryCode, state, priority])
+  @@index([countryCode])
+  @@map("tax_rates")
+}

@@ -89,11 +89,40 @@ const productBody = z.object({
 
 export const createProductSchema = z.object({ body: productBody })
 
+/**
+ * Written out in full rather than derived with `productBody.partial()`.
+ *
+ * Zod's `.partial()` makes a field optional but does NOT strip its `.default()`,
+ * so a PATCH carrying only `{ moq: 1000 }` came back from validation with
+ * `status: "DRAFT"`, `prices: []`, `tiers: []`, `options: []` and
+ * `categoryIds: []` filled in — and the service, seeing those keys present,
+ * would unpublish the product and delete its prices, tier ladder, options and
+ * category links.
+ *
+ * Every field here is optional with NO default, so anything the caller omits
+ * stays untouched. A partial update must never be able to destroy data the
+ * caller never mentioned.
+ */
 export const updateProductSchema = z.object({
 	params: z.object({ id: z.string().uuid() }),
-	body: productBody.partial().extend({
+	body: z.object({
+		kind: z.enum(["MAIN", "OPTION"]).optional(),
+		status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
+		visibility: z
+			.enum(["SHOP_AND_SEARCH", "SHOP_ONLY", "SEARCH_ONLY", "HIDDEN"])
+			.optional(),
+		quoteEnabled: z.boolean().optional(),
+		moq: z.number().int().min(0).optional(),
+		sortOrder: z.number().int().optional(),
+		taxClassId: z.string().uuid().nullable().optional(),
+		featuredAssetId: z.string().uuid().nullable().optional(),
+		categoryIds: z.array(z.string().uuid()).optional(),
+		assetIds: z.array(z.string().uuid()).optional(),
 		translations: z.array(translation).optional(),
 		variants: z.array(variant).optional(),
+		prices: z.array(price).optional(),
+		tiers: z.array(tier).optional(),
+		options: z.array(option).optional(),
 	}),
 })
 

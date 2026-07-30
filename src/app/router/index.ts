@@ -1,7 +1,18 @@
 import { Router } from "express"
+import { AttributeRoutes } from "../modules/attribute/attribute.routes"
 import { AuthRoutes } from "../modules/auth/auth.routes"
+import { BundleRoutes } from "../modules/bundle/bundle.routes"
+import { CartRoutes } from "../modules/cart/cart.routes"
 import { CategoryRoutes } from "../modules/category/category.routes"
+import { MediaRoutes } from "../modules/media/media.routes"
 import { AdminProductRoutes, ProductRoutes } from "../modules/product/product.routes"
+import { AdminOrderRoutes, CheckoutRoutes, OrderRoutes } from "../modules/order/order.routes"
+import { PaymentRoutes } from "../modules/payment/payment.routes"
+import { AdminQuoteRoutes, QuoteRoutes } from "../modules/quote/quote.routes"
+import { SettingRoutes } from "../modules/setting/setting.routes"
+import { ShippingRoutes } from "../modules/shipping/shipping.routes"
+import { TaxRoutes } from "../modules/tax/tax.routes"
+import { VatRoutes } from "../modules/user/vat.routes"
 import { UserRoutes } from "../modules/user/user.routes"
 
 /**
@@ -19,11 +30,23 @@ interface ModuleRoute {
 const moduleRoutes: ModuleRoute[] = [
 	{ path: "/auth", route: AuthRoutes },
 	{ path: "/users", route: UserRoutes },
+	{ path: "/vat", route: VatRoutes },
+	{ path: "/settings", route: SettingRoutes },
 	{ path: "/categories", route: CategoryRoutes },
+	{ path: "/attributes", route: AttributeRoutes },
 	{ path: "/products", route: ProductRoutes },
 	{ path: "/admin/products", route: AdminProductRoutes },
-	// Phase 3: { path: "/cart", route: CartRoutes },
-	// Phase 4: { path: "/quotes", route: QuoteRoutes },
+	{ path: "/media", route: MediaRoutes },
+	{ path: "/cart", route: CartRoutes },
+	{ path: "/configure", route: BundleRoutes },
+	{ path: "/shipping", route: ShippingRoutes },
+	{ path: "/payment-methods", route: PaymentRoutes },
+	{ path: "/admin/tax", route: TaxRoutes },
+	{ path: "/checkout", route: CheckoutRoutes },
+	{ path: "/orders", route: OrderRoutes },
+	{ path: "/admin/orders", route: AdminOrderRoutes },
+	{ path: "/quotes", route: QuoteRoutes },
+	{ path: "/admin/quotes", route: AdminQuoteRoutes },
 ]
 
 const router = Router()

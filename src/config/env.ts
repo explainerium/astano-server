@@ -18,7 +18,14 @@ const envSchema = z.object({
 	JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
 	JWT_REFRESH_EXPIRES_IN: z.string().default("30d"),
 
-	// Cloudflare R2 — optional until the upload module lands (Phase 6).
+	/// Where the API is reachable — used to build media URLs.
+	PUBLIC_BASE_URL: z.string().default("http://localhost:5000"),
+
+	/// "local" writes to ./storage and is the development default. "r2" requires
+	/// the R2_* values below.
+	STORAGE_DRIVER: z.enum(["local", "r2"]).default("local"),
+
+	// Cloudflare R2.
 	R2_ACCOUNT_ID: z.string().optional(),
 	R2_ACCESS_KEY_ID: z.string().optional(),
 	R2_SECRET_ACCESS_KEY: z.string().optional(),

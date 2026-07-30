@@ -57,6 +57,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  carts               Cart[]
+  orders              Order[]
+  quoteBaskets        QuoteBasket[]
+  quoteRequests       QuoteRequest[]
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
 

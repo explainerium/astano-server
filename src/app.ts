@@ -8,6 +8,7 @@ import globalErrorHandler from "./app/middlewares/globalErrorHandler"
 import notFound from "./app/middlewares/notFound"
 import { resolveLocale } from "./app/middlewares/resolveLocale"
 import router from "./app/router"
+import { MediaController } from "./app/modules/media/media.controller"
 import { httpLogger } from "./shared/httpLogger"
 import { missingTranslations } from "./i18n"
 import "./app/interfaces/locale"
@@ -70,6 +71,10 @@ app.get("/health", (req: Request, res: Response) => {
 		},
 	})
 })
+
+// Local-driver public media. With R2 these are served from Cloudflare and this
+// route is never reached.
+app.use("/media", MediaController.servePublicLocal)
 
 app.use("/api/v1", router)
 

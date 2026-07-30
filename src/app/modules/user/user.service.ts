@@ -2,6 +2,7 @@ import type { Prisma, UserRole, UserStatus } from "@prisma/client"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
+import { sendAccountDecision } from "../../../helpers/mailer"
 import { type PublicUser, toPublicUser } from "../auth/auth.interface"
 
 interface ListParams {
@@ -85,7 +86,13 @@ const approve = async (id: string): Promise<PublicUser> => {
 		data: { status: "ACTIVE" },
 	})
 
-	// TODO(Phase 3): send the approval email in the user's locale.
+	await sendAccountDecision({
+		to: updated.email,
+		locale: updated.locale as never,
+		name: [updated.firstName, updated.lastName].filter(Boolean).join(" ") || updated.email,
+		approved: true,
+	})
+
 	return toPublicUser(updated)
 }
 
@@ -108,6 +115,13 @@ const reject = async (id: string): Promise<PublicUser> => {
 			data: { revokedAt: new Date() },
 		}),
 	])
+
+	await sendAccountDecision({
+		to: updated.email,
+		locale: updated.locale as never,
+		name: [updated.firstName, updated.lastName].filter(Boolean).join(" ") || updated.email,
+		approved: false,
+	})
 
 	return toPublicUser(updated)
 }

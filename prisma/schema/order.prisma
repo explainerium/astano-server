@@ -1,0 +1,200 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Orders.
+//
+// THE RULE THAT GOVERNS THIS FILE: an order FREEZES everything.
+//
+// A cart resolves prices live because it is a working document. An order is a
+// legal record — it has to read correctly years later, after the product was
+// renamed, the tier ladder rewritten, the tax rate changed, or the whole
+// product deleted. So every name, price, address, tax line and method title is
+// copied in at checkout, and nothing here is derived from the catalogue at read
+// time. Foreign keys back to the catalogue are informational only, and are
+// deliberately SetNull rather than Cascade.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OrderStatus {
+  /// Placed, awaiting payment (bank transfer sits here).
+  PENDING
+  /// Paid or approved for fulfilment.
+  PROCESSING
+  /// Paused — stock, a query, a manual check.
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+  REFUNDED
+  FAILED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+}
+
+enum AddressType {
+  BILLING
+  SHIPPING
+}
+
+model Order {
+  id String @id @default(uuid())
+
+  /// Sequential, human-facing. Formatted for display (AST-000123) rather than
+  /// stored formatted, so the sequence stays a plain integer.
+  number Int @unique @default(autoincrement())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  status        OrderStatus   @default(PENDING)
+  paymentStatus PaymentStatus @default(UNPAID)
+
+  /// Language the order was placed in — drives invoices and emails forever,
+  /// even if the customer later switches languages.
+  locale   String @default("en")
+  currency String @default("EUR")
+
+  // ── Frozen totals ─────────────────────────────────────────────────────────
+  subtotal      Decimal @db.Decimal(12, 4)
+  shippingTotal Decimal @db.Decimal(12, 4) @default(0)
+  taxTotal      Decimal @db.Decimal(12, 4) @default(0)
+  discountTotal Decimal @db.Decimal(12, 4) @default(0)
+  grandTotal    Decimal @db.Decimal(12, 4)
+
+  /// Total shipped weight, kept for carrier paperwork and disputes.
+  totalWeightKg Decimal? @db.Decimal(12, 3)
+
+  // ── Frozen method snapshots ───────────────────────────────────────────────
+  shippingMethodId    String?
+  shippingMethodCode  String?
+  shippingMethodTitle String?
+
+  paymentMethodId    String?
+  paymentMethodCode  String?
+  paymentMethodTitle String?
+  /// Bank details or similar, as shown to this customer at this moment.
+  paymentInstructions String?
+
+  // ── VAT ───────────────────────────────────────────────────────────────────
+  vatNumber      String?
+  vatValidated   Boolean @default(false)
+  /// True when tax was zeroed under reverse charge — the invoice must say so.
+  reverseCharged Boolean @default(false)
+
+  customerNote String?
+  /// Staff-only. Never returned to the customer.
+  internalNote String?
+
+  placedAt  DateTime  @default(now())
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  items         OrderItem[]
+  addresses     OrderAddress[]
+  taxLines      OrderTaxLine[]
+  statusHistory OrderStatusHistory[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([placedAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Informational. SetNull because deleting a product must never destroy the
+  /// record of what was sold.
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  productId String?
+
+  // ── Frozen at checkout ────────────────────────────────────────────────────
+  sku        String
+  name       String
+  /// Variant attributes as displayed, e.g. ["Small", "Stainless steel"].
+  attributes String[] @default([])
+
+  quantity  Int
+  unitPrice Decimal @db.Decimal(12, 4)
+  lineTotal Decimal @db.Decimal(12, 4)
+
+  /// Tax percentage applied to this line, for the invoice breakdown.
+  taxRatePercent Decimal? @db.Decimal(9, 4)
+  taxAmount      Decimal? @db.Decimal(12, 4)
+
+  weightKg Decimal? @db.Decimal(10, 3)
+
+  /// Option lines sit under the main line they were bought with (§4.6).
+  parentItemId String?
+  parentItem   OrderItem?  @relation("OrderOptionLines", fields: [parentItemId], references: [id], onDelete: Cascade)
+  optionLines  OrderItem[] @relation("OrderOptionLines")
+
+  @@index([orderId])
+  @@index([variantId])
+  @@map("order_items")
+}
+
+/// Addresses are copied, never referenced. A customer editing their address
+/// book must not silently rewrite where a past order was sent.
+model OrderAddress {
+  id      String      @id @default(uuid())
+  orderId String
+  order   Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type    AddressType
+
+  firstName String
+  lastName  String
+  company   String?
+  street1   String
+  street2   String?
+  city      String
+  state     String?
+  postcode  String
+  /// ISO 3166-1 alpha-2 — never a display name. The old shop stored country
+  /// labels here and broke both tax and shipping resolution.
+  countryCode String
+  phone       String?
+  email       String?
+
+  @@unique([orderId, type])
+  @@map("order_addresses")
+}
+
+/// One row per tax rate applied, so an invoice can show the breakdown exactly
+/// as it was calculated — including a 0.00 reverse-charge line.
+model OrderTaxLine {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  name        String
+  ratePercent Decimal @db.Decimal(9, 4)
+  taxableBase Decimal @db.Decimal(12, 4)
+  amount      Decimal @db.Decimal(12, 4)
+
+  @@index([orderId])
+  @@map("order_tax_lines")
+}
+
+model OrderStatusHistory {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+
+  note            String?
+  changedByUserId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_status_history")
+}

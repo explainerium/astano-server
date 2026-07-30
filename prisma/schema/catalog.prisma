@@ -110,6 +110,10 @@ model Product {
   /// identical in all languages, overridable per variant (R3). 0 = disabled.
   moq Int @default(0)
 
+  /// Which tax class applies. Null falls back to the class marked isDefault.
+  taxClassId String?
+  taxClass   TaxClass? @relation(fields: [taxClassId], references: [id], onDelete: SetNull)
+
   featuredAssetId String?
   featuredAsset   Asset?  @relation("ProductFeatured", fields: [featuredAssetId], references: [id], onDelete: SetNull)
 
@@ -202,6 +206,10 @@ model ProductVariant {
   imageAssetId String?
   image        Asset?  @relation("VariantImage", fields: [imageAssetId], references: [id], onDelete: SetNull)
 
+  cartItems       CartItem[]
+  orderItems      OrderItem[]
+  quoteBasketItems  QuoteBasketItem[]
+  quoteRequestItems QuoteRequestItem[]
   translations    VariantTranslation[]
   attributeValues VariantAttributeValue[]
   prices          VariantPrice[]

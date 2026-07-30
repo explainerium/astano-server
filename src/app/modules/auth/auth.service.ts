@@ -7,6 +7,7 @@ import { logger } from "../../../shared/logger"
 import { prisma } from "../../../shared/prisma"
 import { durationToMs, generateToken, hashToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
+import { sendPasswordReset } from "../../../helpers/mailer"
 import { BCRYPT_ROUNDS, RESET_TOKEN_TTL } from "./auth.constant"
 import { type AuthResult, type PublicUser, toPublicUser } from "./auth.interface"
 
@@ -175,8 +176,13 @@ const forgotPassword = async (email: string): Promise<{ resetToken?: string }> =
 		},
 	})
 
-	// TODO(Phase 3): send this by email instead. Until the mailer exists the
-	// token is logged in development only, so the flow is testable.
+	await sendPasswordReset({
+		to: user.email,
+		locale: user.locale as never,
+		token: resetToken,
+	})
+
+	// Also returned in development so the flow stays testable without a mailbox.
 	if (env.NODE_ENV === "development") {
 		logger.info({ email }, `password reset token: ${resetToken}`)
 		return { resetToken }

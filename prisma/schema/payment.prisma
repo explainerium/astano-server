@@ -1,0 +1,85 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Payment methods. Entirely admin-managed, including the rules that decide who
+// may see each one.
+//
+// The old shop hid its invoice gateway behind a hand-written code snippet:
+// logged in AND billing country in {DE, AT} AND at least one completed order.
+// That rule is expressible below as data, so the client can change it without
+// a deploy — and so nobody has to find a snippet to understand why a customer
+// cannot see a payment option.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PaymentMethodType {
+  /// Customer transfers the money; order waits for payment.
+  BANK_TRANSFER
+  /// Goods ship and an invoice follows.
+  INVOICE
+  /// Pay on delivery.
+  CASH_ON_DELIVERY
+  /// Anything configured later.
+  OTHER
+}
+
+model PaymentMethod {
+  id   String            @id @default(uuid())
+  code String            @unique
+  type PaymentMethodType @default(BANK_TRANSFER)
+
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  // ── Availability rules. Empty / zero / false means "no restriction". ───────
+
+  /// ISO country codes this method is offered in. Empty = everywhere.
+  allowedCountries String[] @default([])
+
+  /// Customer roles this method is offered to. Empty = all.
+  allowedRoles UserRole[] @default([])
+
+  /// Requires a signed-in customer.
+  requiresLogin Boolean @default(false)
+
+  /// Minimum number of previously completed orders. 0 = no history needed.
+  /// This is how "returning customers only" is expressed.
+  minCompletedOrders Int @default(0)
+
+  /// Order-value window this method is offered within.
+  minOrderTotal Decimal? @db.Decimal(12, 4)
+  maxOrderTotal Decimal? @db.Decimal(12, 4)
+
+  /// Requires a VAT ID that has been validated against VIES.
+  requiresValidatedVatId Boolean @default(false)
+
+  // ── Method-specific settings ──────────────────────────────────────────────
+
+  /// Bank details for BANK_TRANSFER, or whatever a future method needs.
+  /// Free-form so adding a provider does not need a migration.
+  config Json?
+
+  translations PaymentMethodTranslation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@map("payment_methods")
+}
+
+model PaymentMethodTranslation {
+  id       String        @id @default(uuid())
+  methodId String
+  method   PaymentMethod @relation(fields: [methodId], references: [id], onDelete: Cascade)
+
+  locale String
+
+  /// What the customer sees at checkout.
+  title       String
+  description String?
+
+  /// Shown after ordering and repeated in the confirmation email — for a bank
+  /// transfer this is where the account details belong.
+  instructions String?
+
+  @@unique([methodId, locale])
+  @@map("payment_method_translations")
+}

@@ -4,3 +4,6 @@ dist/
 *.log
 coverage/
 .DS_Store
+storage/
+invoice-*.pdf
+invoice-*.png
