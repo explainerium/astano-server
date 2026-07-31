@@ -1,9 +1,35 @@
 node_modules/
 dist/
-.env
-*.log
 coverage/
-.DS_Store
+
+# env — every variant is private. Only the template is committed, so the
+# negation must stay below the patterns it re-includes.
+.env
+.env.*
+!.env.example
+
+# secrets & certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Local media driver target — product images and, in the private bucket,
+# customer design files (PDF/EPS/AI/STL/STP). Never commit either (R12).
 storage/
+
+# Generated invoices and test renders.
 invoice-*.pdf
 invoice-*.png
+
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# editors & local tooling
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.claude/settings.local.json

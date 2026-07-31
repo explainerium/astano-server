@@ -59,22 +59,53 @@ const apply = async (payload: any, locale: LocaleCode) => {
 		})
 	}
 
+	// Hashed before the transaction opens — bcrypt at cost 12 would otherwise
+	// pin a database connection for hundreds of milliseconds.
+	const passwordHash = await bcrypt.hash(payload.password, BCRYPT_ROUNDS)
+
 	const created = await prisma.$transaction(async (tx) => {
 		const user = await tx.user.create({
 			data: {
 				email: payload.email,
-				passwordHash: await bcrypt.hash(payload.password, BCRYPT_ROUNDS),
+				passwordHash,
 				// RESELLER but PENDING: they can sign in and see their status, and
 				// R5b prices them as a guest until someone approves. Registering
 				// must never be the thing that unlocks wholesale prices.
 				role: "RESELLER",
 				status: "PENDING",
+				salutation: payload.salutation ?? null,
 				firstName: payload.firstName,
 				lastName: payload.lastName,
 				company: payload.companyName,
 				phone: payload.phone ?? null,
 				vatNumber: payload.vatNumber ?? null,
+				foundingDate: payload.foundingDate ?? null,
+				psiMember: payload.psiMember ?? false,
+				// Validation already refused anything but an explicit true.
+				termsAcceptedAt: new Date(),
 				locale: payload.locale ?? locale,
+			},
+		})
+
+		// The application keeps its own copy of the address as submitted — it is
+		// evidence of what was applied for and must not change afterwards. This
+		// one is the customer's editable address book, so checkout is not empty
+		// on their first order.
+		await tx.address.create({
+			data: {
+				userId: user.id,
+				firstName: payload.firstName,
+				lastName: payload.lastName,
+				company: payload.companyName,
+				street1: payload.street,
+				street2: payload.street2 ?? null,
+				postcode: payload.postcode,
+				city: payload.city,
+				countryCode: payload.countryCode,
+				phone: payload.phone ?? null,
+				email: payload.email,
+				isDefaultBilling: true,
+				isDefaultShipping: true,
 			},
 		})
 

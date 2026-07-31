@@ -2,6 +2,7 @@ import type { Request, RequestHandler, Response } from "express"
 import { env } from "../../../config"
 import { catchAsync } from "../../../shared/catchAsync"
 import { httpStatus } from "../../../shared/httpStatus"
+import { logger } from "../../../shared/logger"
 import { sendResponse } from "../../../shared/sendResponse"
 import { durationToMs } from "../../../shared/token"
 import { t } from "../../../i18n"
@@ -24,6 +25,19 @@ const device = (req: Request) => ({
 })
 
 const register: RequestHandler = catchAsync(async (req, res) => {
+	// Honeypot. Bots fill every field they find; nobody else can see this one.
+	// Answer 201 anyway — telling a spammer their submission was rejected only
+	// teaches them which field to leave alone next time. Logged so that a false
+	// positive (an over-eager password manager) is traceable rather than silent.
+	if (req.body.email2) {
+		logger.warn({ email: req.body.email }, "registration honeypot triggered")
+		sendResponse(res, {
+			statusCode: httpStatus.CREATED,
+			message: t("auth.registered", req.locale),
+		})
+		return
+	}
+
 	const result = await AuthService.register(req.body, device(req))
 	setRefreshCookie(res, result.refreshToken)
 

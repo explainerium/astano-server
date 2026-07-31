@@ -43,11 +43,20 @@ const register = async (
 	payload: {
 		email: string
 		password: string
-		firstName?: string
-		lastName?: string
-		company?: string
-		phone?: string
 		locale?: string
+		salutation?: string
+		firstName: string
+		lastName: string
+		phone?: string
+		company: string
+		foundingDate?: Date
+		vatNumber?: string
+		psiMember?: boolean
+		street: string
+		street2?: string
+		postcode: string
+		city: string
+		countryCode: string
 	},
 	device: DeviceInfo
 ): Promise<AuthResult> => {
@@ -58,21 +67,60 @@ const register = async (
 		})
 	}
 
+	// Hashed before the transaction opens: bcrypt at cost 12 takes hundreds of
+	// milliseconds, and holding a database transaction open for that would pin a
+	// connection for no reason.
+	const passwordHash = await bcrypt.hash(payload.password, BCRYPT_ROUNDS)
+
 	// Self-registration always produces an ACTIVE B2C account. Becoming a
 	// RESELLER is a separate, admin-approved flow (§4.4) — it is never something
 	// a request body can ask for.
-	const user = await prisma.user.create({
-		data: {
-			email: payload.email,
-			passwordHash: await bcrypt.hash(payload.password, BCRYPT_ROUNDS),
-			role: "B2C",
-			status: "ACTIVE",
-			firstName: payload.firstName ?? null,
-			lastName: payload.lastName ?? null,
-			company: payload.company ?? null,
-			phone: payload.phone ?? null,
-			locale: payload.locale ?? "en",
-		},
+	//
+	// The account and its address are written together. An account that exists
+	// with no address would send the customer to checkout with an empty form
+	// having already told us where they live.
+	const user = await prisma.$transaction(async (tx) => {
+		const created = await tx.user.create({
+			data: {
+				email: payload.email,
+				passwordHash,
+				role: "B2C",
+				status: "ACTIVE",
+				salutation: payload.salutation ?? null,
+				firstName: payload.firstName,
+				lastName: payload.lastName,
+				company: payload.company,
+				phone: payload.phone ?? null,
+				vatNumber: payload.vatNumber ?? null,
+				foundingDate: payload.foundingDate ?? null,
+				psiMember: payload.psiMember ?? false,
+				// Validation already refused anything but an explicit true.
+				termsAcceptedAt: new Date(),
+				locale: payload.locale ?? "en",
+			},
+		})
+
+		await tx.address.create({
+			data: {
+				userId: created.id,
+				firstName: payload.firstName,
+				lastName: payload.lastName,
+				company: payload.company,
+				street1: payload.street,
+				street2: payload.street2 ?? null,
+				postcode: payload.postcode,
+				city: payload.city,
+				countryCode: payload.countryCode,
+				phone: payload.phone ?? null,
+				email: payload.email,
+				// Their only address, so it is both defaults — otherwise checkout
+				// would show an address book with nothing selected.
+				isDefaultBilling: true,
+				isDefaultShipping: true,
+			},
+		})
+
+		return created
 	})
 
 	return issueTokens(user, device)

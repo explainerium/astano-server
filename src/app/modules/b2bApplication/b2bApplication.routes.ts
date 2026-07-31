@@ -2,6 +2,7 @@ import { Router } from "express"
 import rateLimit from "express-rate-limit"
 import { catchAsync } from "../../../shared/catchAsync"
 import { httpStatus } from "../../../shared/httpStatus"
+import { logger } from "../../../shared/logger"
 import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import { auth } from "../../middlewares/auth"
@@ -30,6 +31,18 @@ B2bRoutes.post(
 	applyLimiter,
 	validateRequest(B2bValidation.applySchema),
 	catchAsync(async (req, res) => {
+		// Honeypot. Nobody but a bot can see this field. Answer 201 anyway —
+		// telling a spammer their submission was rejected only teaches them
+		// which field to leave alone. Logged so a false positive is traceable.
+		if (req.body.email2) {
+			logger.warn({ email: req.body.email }, "dealer application honeypot triggered")
+			sendResponse(res, {
+				statusCode: httpStatus.CREATED,
+				message: t("b2b.submitted", req.locale),
+			})
+			return
+		}
+
 		sendResponse(res, {
 			statusCode: httpStatus.CREATED,
 			message: t("b2b.submitted", req.locale),

@@ -42,6 +42,17 @@ export const applySchema = z.object({
 		phone: z.string().trim().max(50).optional(),
 
 		message: z.string().trim().max(2000).optional(),
+
+		/// Must be true, not merely present — an unchecked box is a refusal.
+		/// Required on the live dealer form (§4.4 field 16).
+		acceptedTerms: z.literal(true, {
+			message: "The terms and privacy policy must be accepted",
+		}),
+
+		/// Honeypot, matching the trap field on the old forms (`email_2`).
+		/// Permissive on purpose: a validation error would tell a bot exactly
+		/// which field gave it away, so the handler decides instead.
+		email2: z.string().max(500).optional(),
 	}),
 })
 

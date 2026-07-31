@@ -36,13 +36,36 @@ model User {
   role   UserRole   @default(B2C)
   status UserStatus @default(ACTIVE)
 
-  // Profile. The dealer-registration form collects more than this (§4.4);
-  // those extra fields land with the b2bApplication module in Phase 6.
+  // Profile.
+  //
+  // Both registration forms — B2C on My Account and the dealer form — collect
+  // the same 16 fields (§4.4). astano's retail buyers are bakeries, so company
+  // and a full address are required even for B2C. The fields below are the ones
+  // shared by both; B2bApplication holds only the dealer-specific extras
+  // (registerNumber, website, businessType, expectedVolume, message).
   firstName String?
   lastName  String?
   company   String?
   phone     String?
   vatNumber String?
+
+  /// "Herr" / "Frau". Free text rather than an enum — the form offers two
+  /// options today and a closed set would need a migration to add a third.
+  salutation String?
+
+  /// Date the customer's business was founded ("Gründungsdatum").
+  foundingDate DateTime?
+
+  /// Member of the PSI trade association. Asked on both registration forms.
+  psiMember Boolean @default(false)
+
+  /// When the AGB and privacy policy were accepted.
+  ///
+  /// A timestamp, not a boolean: what has to be provable is *when* consent was
+  /// given. The newsletter module records confirmedAt for exactly this reason.
+  /// Null means the account predates the requirement, which is different from
+  /// "declined" — nobody can register without accepting.
+  termsAcceptedAt DateTime?
 
   /// Preferred locale, e.g. "en" or "de". Drives email language.
   locale String @default("en")

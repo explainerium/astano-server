@@ -6,11 +6,14 @@ export interface PublicUser {
 	email: string
 	role: UserRole
 	status: UserStatus
+	salutation: string | null
 	firstName: string | null
 	lastName: string | null
 	company: string | null
 	phone: string | null
 	vatNumber: string | null
+	foundingDate: Date | null
+	psiMember: boolean
 	locale: string
 	createdAt: Date
 }
@@ -29,11 +32,14 @@ export const toPublicUser = (user: User): PublicUser => ({
 	email: user.email,
 	role: user.role,
 	status: user.status,
+	salutation: user.salutation,
 	firstName: user.firstName,
 	lastName: user.lastName,
 	company: user.company,
 	phone: user.phone,
 	vatNumber: user.vatNumber,
+	foundingDate: user.foundingDate,
+	psiMember: user.psiMember,
 	locale: user.locale,
 	createdAt: user.createdAt,
 })
