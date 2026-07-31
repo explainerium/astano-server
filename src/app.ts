@@ -74,7 +74,24 @@ app.get("/health", (req: Request, res: Response) => {
 
 // Local-driver public media. With R2 these are served from Cloudflare and this
 // route is never reached.
-app.use("/media", MediaController.servePublicLocal)
+app.use(
+	"/media",
+	(_req, res, next) => {
+		/**
+		 * Product images exist to be embedded by the storefront and the admin,
+		 * which run on a different origin in development (3000 vs 5000).
+		 *
+		 * helmet defaults Cross-Origin-Resource-Policy to `same-origin`, which
+		 * makes the browser refuse to *render* the image even though the request
+		 * succeeds — so it shows as a broken image while curl reports 200. Relaxed
+		 * for this route only: these bytes are public by definition. Everything
+		 * else, including every JSON response, keeps the strict default.
+		 */
+		res.setHeader("Cross-Origin-Resource-Policy", "cross-origin")
+		next()
+	},
+	MediaController.servePublicLocal
+)
 
 app.use("/api/v1", router)
 

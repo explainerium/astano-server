@@ -7,7 +7,11 @@ import { AttributeValidation } from "./attribute.validation"
 const router = Router()
 
 // Public: the shop needs these to render variant pickers and filters.
-router.get("/", validateRequest(AttributeValidation.listAttributesSchema), AttributeController.list)
+//
+// No filter for "variant axes only" — whether an attribute builds variants is a
+// per-product fact (ProductAttribute.isVariation), not a property of the
+// attribute, so the question cannot be answered from this list alone.
+router.get("/", AttributeController.list)
 
 router.get(
 	"/:id",
@@ -43,5 +47,22 @@ router.delete(
 	AttributeController.removeValue
 )
 
+/**
+ * Staff reads, mirroring /admin/categories and /admin/products. Separate from
+ * the public routes because the payload differs, not just the permission.
+ */
+const adminRouter = Router()
+
+adminRouter.use(auth("ADMIN", "SHOP_MANAGER"))
+
+adminRouter.get("/", AttributeController.adminList)
+
+adminRouter.get(
+	"/:id",
+	validateRequest(AttributeValidation.attributeIdSchema),
+	AttributeController.adminGetById
+)
+
+export const AdminAttributeRoutes = adminRouter
 export const AttributeRoutes = router
 export default router

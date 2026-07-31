@@ -22,6 +22,19 @@ export const WEBP_QUALITY = 82
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 /** Design files are production input and can legitimately be large. */
+/**
+ * Sentinel for "media nobody filed".
+ *
+ * Unfiled assets have `folderId = null`, which cannot be expressed as a uuid,
+ * and an absent folderId already means "no filter, show everything" — so
+ * without this there is no way to ask the question at all.
+ *
+ * Deliberately not a real "Default" folder row: an admin could rename, move or
+ * delete that, and every unfiled asset would then point at something that no
+ * longer means what it did. Null cannot be renamed.
+ */
+export const UNFILED = "none"
+
 export const MAX_FILE_BYTES = 50 * 1024 * 1024
 
 export const ALLOWED_IMAGE_TYPES = [

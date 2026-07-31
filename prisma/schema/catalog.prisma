@@ -240,11 +240,18 @@ model VariantTranslation {
 
 // ── Attributes ───────────────────────────────────────────────────────────────
 
+/// A global attribute and its list of possible values — WooCommerce's
+/// Products → Attributes screen.
+///
+/// Deliberately carries **no** "used for variations" flag. Whether an attribute
+/// builds variants is a per-product decision (`ProductAttribute.isVariation`),
+/// exactly as WooCommerce stores it in `_product_attributes`. The same
+/// attribute can split one product into versions while being plain information
+/// on another — astano's own `pa_material` is `is_variation: 1` on one product
+/// and would be a specification elsewhere.
 model Attribute {
   id        String  @id @default(uuid())
   code      String  @unique
-  /// Whether this attribute is used to build variants, or is descriptive only.
-  isVariantAxis Boolean @default(false)
   sortOrder Int     @default(0)
 
   translations AttributeTranslation[]
@@ -305,7 +312,13 @@ model ProductAttribute {
   attributeValueId String
   attributeValue   AttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
 
+  /// WooCommerce's `is_visible` — shown in the specification table.
   isVisible Boolean @default(true)
+
+  /// WooCommerce's `is_variation` — this attribute splits *this* product into
+  /// variants. Decided per product, not globally on the attribute, so "Size"
+  /// can drive variants on one product and be a plain spec on another.
+  isVariation Boolean @default(false)
 
   @@id([productId, attributeId, attributeValueId])
   @@index([attributeId])

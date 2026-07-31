@@ -20,9 +20,6 @@ const valueInput = z.object({
 export const createAttributeSchema = z.object({
 	body: z.object({
 		code,
-		/// True when this attribute is used to build variants (Size, Colour);
-		/// false when it is purely descriptive (Material).
-		isVariantAxis: z.boolean().default(false),
 		sortOrder: z.number().int().default(0),
 		translations: z.array(z.object({ locale, name: z.string().trim().min(1).max(200) })).min(1),
 		values: z.array(valueInput).default([]),
@@ -33,7 +30,6 @@ export const updateAttributeSchema = z.object({
 	params: z.object({ id: z.string().uuid() }),
 	body: z.object({
 		code: code.optional(),
-		isVariantAxis: z.boolean().optional(),
 		sortOrder: z.number().int().optional(),
 		translations: z.array(z.object({ locale, name: z.string().trim().min(1).max(200) })).optional(),
 		values: z.array(valueInput).optional(),
@@ -44,15 +40,8 @@ export const attributeIdSchema = z.object({
 	params: z.object({ id: z.string().uuid() }),
 })
 
-export const listAttributesSchema = z.object({
-	query: z.object({
-		variantAxisOnly: z.coerce.boolean().default(false),
-	}),
-})
-
 export const AttributeValidation = {
 	createAttributeSchema,
 	updateAttributeSchema,
 	attributeIdSchema,
-	listAttributesSchema,
 }

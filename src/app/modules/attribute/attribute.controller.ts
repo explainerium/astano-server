@@ -6,12 +6,11 @@ import { t } from "../../../i18n"
 import { AttributeService } from "./attribute.service"
 
 const list: RequestHandler = catchAsync(async (req, res) => {
-	const { variantAxisOnly } = req.query as unknown as { variantAxisOnly?: boolean }
 
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
 		message: t("common.ok", req.locale),
-		data: await AttributeService.list(req.locale, Boolean(variantAxisOnly)),
+		data: await AttributeService.list(req.locale),
 	})
 })
 
@@ -49,4 +48,30 @@ const removeValue: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, { statusCode: httpStatus.OK, message: t("attribute.valueDeleted", req.locale) })
 })
 
-export const AttributeController = { list, getById, create, update, remove, removeValue }
+/** Staff list — every translation attached, for the editor. */
+const adminList: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await AttributeService.adminList(),
+	})
+})
+
+const adminGetById: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await AttributeService.adminGetById(req.params.id as string),
+	})
+})
+
+export const AttributeController = {
+	list,
+	getById,
+	create,
+	update,
+	remove,
+	removeValue,
+	adminList,
+	adminGetById,
+}

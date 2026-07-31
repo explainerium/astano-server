@@ -14,6 +14,7 @@ import {
 	MAX_FILE_BYTES,
 	MAX_IMAGE_BYTES,
 	SIGNED_URL_TTL_SECONDS,
+	UNFILED,
 	WEBP_QUALITY,
 } from "./media.constant"
 
@@ -200,7 +201,11 @@ const list = async (params: {
 	limit: number
 }) => {
 	const where: Prisma.AssetWhereInput = {
-		...(params.folderId ? { folderId: params.folderId } : {}),
+		// UNFILED means "folderId IS NULL", not "no filter" — an absent folderId
+		// already means the latter.
+		...(params.folderId
+			? { folderId: params.folderId === UNFILED ? null : params.folderId }
+			: {}),
 		...(params.visibility ? { visibility: params.visibility } : {}),
 		...(params.search
 			? { originalName: { contains: params.search, mode: "insensitive" } }

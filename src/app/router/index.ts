@@ -4,7 +4,7 @@ import { AdminB2bRoutes, B2bRoutes } from "../modules/b2bApplication/b2bApplicat
 import { AdminContactRoutes, ContactRoutes } from "../modules/contact/contact.routes"
 import { AdminNewsletterRoutes, NewsletterRoutes } from "../modules/newsletter/newsletter.routes"
 import { WishlistRoutes } from "../modules/wishlist/wishlist.routes"
-import { AttributeRoutes } from "../modules/attribute/attribute.routes"
+import { AdminAttributeRoutes, AttributeRoutes } from "../modules/attribute/attribute.routes"
 import { AuthRoutes } from "../modules/auth/auth.routes"
 import { BundleRoutes } from "../modules/bundle/bundle.routes"
 import { CartRoutes } from "../modules/cart/cart.routes"
@@ -43,6 +43,7 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/categories", route: CategoryRoutes },
 	{ path: "/admin/categories", route: AdminCategoryRoutes },
 	{ path: "/attributes", route: AttributeRoutes },
+	{ path: "/admin/attributes", route: AdminAttributeRoutes },
 	{ path: "/products", route: ProductRoutes },
 	{ path: "/admin/products", route: AdminProductRoutes },
 	{ path: "/media", route: MediaRoutes },

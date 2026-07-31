@@ -1,9 +1,11 @@
 import { z } from "zod"
 import { SUPPORTED_LOCALES } from "../../../config/locales"
+import { UNFILED } from "./media.constant"
 
 export const listSchema = z.object({
 	query: z.object({
-		folderId: z.string().uuid().optional(),
+		/** A folder id, or UNFILED ("none") for media nobody has filed. */
+		folderId: z.union([z.literal(UNFILED), z.string().uuid()]).optional(),
 		visibility: z.enum(["PUBLIC", "PRIVATE"]).optional(),
 		search: z.string().trim().max(200).optional(),
 		page: z.coerce.number().int().min(1).default(1),

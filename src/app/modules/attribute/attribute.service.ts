@@ -19,7 +19,6 @@ const pick = <T extends { locale: string }>(rows: T[], locale: LocaleCode): T | 
 const view = (row: AttributeRow, locale: LocaleCode) => ({
 	id: row.id,
 	code: row.code,
-	isVariantAxis: row.isVariantAxis,
 	sortOrder: row.sortOrder,
 	name: pick(row.translations, locale)?.name ?? row.code,
 	values: row.values.map((v) => ({
@@ -30,9 +29,8 @@ const view = (row: AttributeRow, locale: LocaleCode) => ({
 	})),
 })
 
-const list = async (locale: LocaleCode, variantAxisOnly: boolean) => {
+const list = async (locale: LocaleCode) => {
 	const rows = await prisma.attribute.findMany({
-		where: variantAxisOnly ? { isVariantAxis: true } : {},
 		include,
 		orderBy: { sortOrder: "asc" },
 	})
@@ -60,7 +58,6 @@ interface ValueInput {
 const create = async (
 	payload: {
 		code: string
-		isVariantAxis?: boolean
 		sortOrder?: number
 		translations: { locale: string; name: string }[]
 		values?: ValueInput[]
@@ -70,7 +67,6 @@ const create = async (
 	const row = await prisma.attribute.create({
 		data: {
 			code: payload.code,
-			isVariantAxis: payload.isVariantAxis ?? false,
 			sortOrder: payload.sortOrder ?? 0,
 			translations: { create: payload.translations },
 			values: {
@@ -91,7 +87,6 @@ const update = async (
 	id: string,
 	payload: {
 		code?: string
-		isVariantAxis?: boolean
 		sortOrder?: number
 		translations?: { locale: string; name: string }[]
 		values?: ValueInput[]
@@ -110,7 +105,6 @@ const update = async (
 			where: { id },
 			data: {
 				...(payload.code !== undefined ? { code: payload.code } : {}),
-				...(payload.isVariantAxis !== undefined ? { isVariantAxis: payload.isVariantAxis } : {}),
 				...(payload.sortOrder !== undefined ? { sortOrder: payload.sortOrder } : {}),
 			},
 		})
@@ -193,4 +187,64 @@ const removeValue = async (valueId: string): Promise<void> => {
 	await prisma.attributeValue.delete({ where: { id: valueId } })
 }
 
-export const AttributeService = { list, getById, create, update, remove, removeValue }
+// ─── Staff reads ─────────────────────────────────────────────────────────────
+
+/**
+ * What staff see: every translation, for the attribute **and** each of its
+ * values.
+ *
+ * The public view resolves to one language, which is right for a variant picker
+ * and useless for an editor — you cannot edit the German label of "Large" if the
+ * only thing the API returns is the English one.
+ */
+export interface AdminAttributeView {
+	id: string
+	code: string
+	sortOrder: number
+	translations: { locale: string; name: string }[]
+	values: {
+		id: string
+		code: string
+		sortOrder: number
+		translations: { locale: string; label: string }[]
+	}[]
+}
+
+const adminView = (row: AttributeRow): AdminAttributeView => ({
+	id: row.id,
+	code: row.code,
+	sortOrder: row.sortOrder,
+	translations: row.translations.map((t) => ({ locale: t.locale, name: t.name })),
+	values: row.values.map((v) => ({
+		id: v.id,
+		code: v.code,
+		sortOrder: v.sortOrder,
+		translations: v.translations.map((t) => ({ locale: t.locale, label: t.label })),
+	})),
+})
+
+const adminList = async (): Promise<AdminAttributeView[]> => {
+	const rows = await prisma.attribute.findMany({ include, orderBy: { sortOrder: "asc" } })
+	return rows.map(adminView)
+}
+
+const adminGetById = async (id: string): Promise<AdminAttributeView> => {
+	const row = await prisma.attribute.findUnique({ where: { id }, include })
+	if (!row) {
+		throw new ApiError(httpStatus.NOT_FOUND, "Attribute not found", {
+			messageKey: "attribute.notFound",
+		})
+	}
+	return adminView(row)
+}
+
+export const AttributeService = {
+	list,
+	getById,
+	create,
+	update,
+	remove,
+	removeValue,
+	adminList,
+	adminGetById,
+}
