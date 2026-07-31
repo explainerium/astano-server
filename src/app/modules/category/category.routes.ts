@@ -40,5 +40,25 @@ router.delete(
 	CategoryController.remove
 )
 
+/**
+ * Staff reads, mirroring the /admin/products pattern.
+ *
+ * Separate from the public routes because the payload is different, not just
+ * the permission: these return every translation so the editor can show the
+ * German name alongside the English one.
+ */
+const adminRouter = Router()
+
+adminRouter.use(auth("ADMIN", "SHOP_MANAGER"))
+
+adminRouter.get("/", CategoryController.adminList)
+
+adminRouter.get(
+	"/:id",
+	validateRequest(CategoryValidation.categoryIdSchema),
+	CategoryController.adminGetById
+)
+
+export const AdminCategoryRoutes = adminRouter
 export const CategoryRoutes = router
 export default router

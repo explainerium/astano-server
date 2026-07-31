@@ -8,7 +8,7 @@ import { AttributeRoutes } from "../modules/attribute/attribute.routes"
 import { AuthRoutes } from "../modules/auth/auth.routes"
 import { BundleRoutes } from "../modules/bundle/bundle.routes"
 import { CartRoutes } from "../modules/cart/cart.routes"
-import { CategoryRoutes } from "../modules/category/category.routes"
+import { AdminCategoryRoutes, CategoryRoutes } from "../modules/category/category.routes"
 import { MediaRoutes } from "../modules/media/media.routes"
 import { AdminProductRoutes, ProductRoutes } from "../modules/product/product.routes"
 import { AdminOrderRoutes, CheckoutRoutes, OrderRoutes } from "../modules/order/order.routes"
@@ -41,6 +41,7 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/admin/b2b", route: AdminB2bRoutes },
 	{ path: "/settings", route: SettingRoutes },
 	{ path: "/categories", route: CategoryRoutes },
+	{ path: "/admin/categories", route: AdminCategoryRoutes },
 	{ path: "/attributes", route: AttributeRoutes },
 	{ path: "/products", route: ProductRoutes },
 	{ path: "/admin/products", route: AdminProductRoutes },

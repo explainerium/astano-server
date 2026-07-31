@@ -28,6 +28,27 @@ export interface CategoryView {
 	children?: CategoryView[]
 }
 
+/**
+ * What staff see. Carries **every** translation rather than one resolved
+ * language.
+ *
+ * The public view deliberately collapses a category to the requested locale,
+ * which is right for a storefront and useless for an editor: you cannot edit
+ * the German name of a category if the only thing the API ever returns is the
+ * English one.
+ */
+export interface AdminCategoryView {
+	id: string
+	parentId: string | null
+	sortOrder: number
+	isHidden: boolean
+	isOptionCategory: boolean
+	imageAssetId: string | null
+	productCount: number
+	translations: TranslationInput[]
+	createdAt: Date
+}
+
 type CategoryWithTranslations = Prisma.CategoryGetPayload<{
 	include: { translations: true; _count: { select: { products: true } } }
 }>
@@ -291,4 +312,65 @@ const remove = async (id: string): Promise<void> => {
 	await prisma.category.delete({ where: { id } })
 }
 
-export const CategoryService = { list, getBySlug, getById, create, update, remove }
+// ─── Staff reads ─────────────────────────────────────────────────────────────
+
+const adminView = (row: CategoryWithTranslations): AdminCategoryView => ({
+	id: row.id,
+	parentId: row.parentId,
+	sortOrder: row.sortOrder,
+	isHidden: row.isHidden,
+	isOptionCategory: row.isOptionCategory,
+	imageAssetId: row.imageAssetId,
+	productCount: row._count.products,
+	translations: row.translations.map((t) => ({
+		locale: t.locale,
+		name: t.name,
+		slug: t.slug ?? undefined,
+		description: t.description ?? undefined,
+		metaTitle: t.metaTitle ?? undefined,
+		metaDescription: t.metaDescription ?? undefined,
+	})),
+	createdAt: row.createdAt,
+})
+
+/**
+ * Flat, hidden ones included, every translation attached.
+ *
+ * Flat rather than a tree: the editor needs the parent picker to list every
+ * category anyway, and building the tree from parentId in the client is
+ * trivial. Sorted so the picker reads in a stable order.
+ */
+const adminList = async (): Promise<AdminCategoryView[]> => {
+	const rows = await prisma.category.findMany({
+		include: { translations: true, _count: { select: { products: true } } },
+		orderBy: { sortOrder: "asc" },
+	})
+
+	return rows.map(adminView)
+}
+
+const adminGetById = async (id: string): Promise<AdminCategoryView> => {
+	const row = await prisma.category.findUnique({
+		where: { id },
+		include: { translations: true, _count: { select: { products: true } } },
+	})
+
+	if (!row) {
+		throw new ApiError(httpStatus.NOT_FOUND, "Category not found", {
+			messageKey: "category.notFound",
+		})
+	}
+
+	return adminView(row)
+}
+
+export const CategoryService = {
+	list,
+	getBySlug,
+	getById,
+	create,
+	update,
+	remove,
+	adminList,
+	adminGetById,
+}

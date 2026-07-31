@@ -57,4 +57,29 @@ const remove: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
-export const CategoryController = { list, getBySlug, create, update, remove }
+/** Staff list — flat, hidden included, every translation attached. */
+const adminList: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await CategoryService.adminList(),
+	})
+})
+
+const adminGetById: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await CategoryService.adminGetById(req.params.id as string),
+	})
+})
+
+export const CategoryController = {
+	list,
+	getBySlug,
+	create,
+	update,
+	remove,
+	adminList,
+	adminGetById,
+}
