@@ -57,6 +57,57 @@ const variant = z.object({
 	tiers: z.array(tier).default([]),
 })
 
+/**
+ * The variant shape for a PATCH — every field optional, **no defaults**.
+ *
+ * `variant` above carries `.default()` on stock, prices, tiers and the rest,
+ * which is right for a create and catastrophic for a partial update: an omitted
+ * `prices` arrives as `[]`, the service sees a truthy value, and deletes the
+ * ladder it was never asked to touch. Omitted `stock` arrives as `0` and zeroes
+ * live inventory.
+ *
+ * Same reasoning as updateProductSchema below — a partial update must never
+ * destroy data the caller never mentioned.
+ */
+const variantPatch = z.object({
+	id: z.string().uuid().optional(),
+	sku: z.string().trim().min(1).max(100),
+	isDefault: z.boolean().optional(),
+	isActive: z.boolean().optional(),
+	sortOrder: z.number().int().optional(),
+	moq: z.number().int().min(0).nullable().optional(),
+	manageStock: z.boolean().optional(),
+	stock: z.number().int().optional(),
+	allowBackorder: z.boolean().optional(),
+	lowStockThreshold: z.number().int().min(0).nullable().optional(),
+	weightKg: money.nullable().optional(),
+	lengthCm: money.nullable().optional(),
+	widthCm: money.nullable().optional(),
+	heightCm: money.nullable().optional(),
+	imageAssetId: z.string().uuid().nullable().optional(),
+	attributeValueIds: z.array(z.string().uuid()).optional(),
+	prices: z.array(price).optional(),
+	tiers: z.array(tier).optional(),
+})
+
+/**
+ * A product's attributes, grouped the way WooCommerce presents them.
+ *
+ * The table stores one row per selected value, but `is_visible` and
+ * `is_variation` belong to the attribute as a whole — so the payload groups by
+ * attribute and the service expands it. Grouping also makes the impossible
+ * state unrepresentable: the same attribute cannot arrive twice with
+ * contradictory flags.
+ */
+const productAttribute = z.object({
+	attributeId: z.string().uuid(),
+	attributeValueIds: z.array(z.string().uuid()).min(1),
+	/// Shown in the specification table on the product page.
+	isVisible: z.boolean().default(true),
+	/// This attribute splits *this* product into variants.
+	isVariation: z.boolean().default(false),
+})
+
 /** Direct option assignment — no bundle entity to create first. */
 const option = z.object({
 	optionProductId: z.string().uuid(),
@@ -75,11 +126,14 @@ const productBody = z.object({
 		.enum(["SHOP_AND_SEARCH", "SHOP_ONLY", "SEARCH_ONLY", "HIDDEN"])
 		.default("SHOP_AND_SEARCH"),
 	quoteEnabled: z.boolean().default(false),
+	/// Whether tax applies at all. The tax *class* decides the rate when it does.
+	taxStatus: z.enum(["TAXABLE", "SHIPPING_ONLY", "NONE"]).default("TAXABLE"),
 	moq: z.number().int().min(0).default(0),
 	sortOrder: z.number().int().default(0),
 	featuredAssetId: z.string().uuid().nullable().optional(),
 	categoryIds: z.array(z.string().uuid()).default([]),
 	assetIds: z.array(z.string().uuid()).default([]),
+	attributes: z.array(productAttribute).default([]),
 	translations: z.array(translation).min(1),
 	variants: z.array(variant).min(1),
 	prices: z.array(price).default([]),
@@ -112,14 +166,16 @@ export const updateProductSchema = z.object({
 			.enum(["SHOP_AND_SEARCH", "SHOP_ONLY", "SEARCH_ONLY", "HIDDEN"])
 			.optional(),
 		quoteEnabled: z.boolean().optional(),
+		taxStatus: z.enum(["TAXABLE", "SHIPPING_ONLY", "NONE"]).optional(),
 		moq: z.number().int().min(0).optional(),
 		sortOrder: z.number().int().optional(),
 		taxClassId: z.string().uuid().nullable().optional(),
 		featuredAssetId: z.string().uuid().nullable().optional(),
 		categoryIds: z.array(z.string().uuid()).optional(),
 		assetIds: z.array(z.string().uuid()).optional(),
+		attributes: z.array(productAttribute).optional(),
 		translations: z.array(translation).optional(),
-		variants: z.array(variant).optional(),
+		variants: z.array(variantPatch).optional(),
 		prices: z.array(price).optional(),
 		tiers: z.array(tier).optional(),
 		options: z.array(option).optional(),
@@ -148,6 +204,8 @@ export const adminListProductsSchema = z.object({
 		visibility: z
 			.enum(["SHOP_AND_SEARCH", "SHOP_ONLY", "SEARCH_ONLY", "HIDDEN"])
 			.optional(),
+		categoryId: z.string().uuid().optional(),
+		stockStatus: z.enum(["IN_STOCK", "OUT_OF_STOCK", "ON_BACKORDER"]).optional(),
 		search: z.string().trim().max(200).optional(),
 		page: z.coerce.number().int().min(1).default(1),
 		limit: z.coerce.number().int().min(1).max(200).default(50),

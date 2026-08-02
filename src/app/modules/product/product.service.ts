@@ -18,6 +18,7 @@ import ApiError from "../../errors/ApiError"
 const detailInclude = {
 	translations: true,
 	categories: { include: { category: { include: { translations: true } } } },
+	attributes: true,
 	prices: true,
 	priceTiers: true,
 	assets: { include: { asset: true }, orderBy: { sortOrder: "asc" } },
@@ -233,12 +234,32 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 		status: row.status,
 		visibility: row.visibility,
 		quoteEnabled: row.quoteEnabled,
+		taxStatus: row.taxStatus,
 		moq: row.moq,
 		sortOrder: row.sortOrder,
 		name: t?.name ?? "(untitled)",
 		slug: t?.slug ?? row.id,
 		translations: row.translations,
 		categoryIds: row.categories.map((c) => c.categoryId),
+		// Loaded by detailInclude but previously dropped here, so the editor had
+		// no way to show which images a product already had.
+		featuredAssetId: row.featuredAssetId,
+		assetIds: row.assets.map((a) => a.assetId),
+		// Rows regrouped back to one entry per attribute, mirroring the payload.
+		attributes: [
+			...row.attributes
+				.reduce((map, a) => {
+					const entry = map.get(a.attributeId) ?? {
+						attributeId: a.attributeId,
+						attributeValueIds: [] as string[],
+						isVisible: a.isVisible,
+						isVariation: a.isVariation,
+					}
+					entry.attributeValueIds.push(a.attributeValueId)
+					return map.set(a.attributeId, entry)
+				}, new Map<string, { attributeId: string; attributeValueIds: string[]; isVisible: boolean; isVariation: boolean }>())
+				.values(),
+		],
 		prices: row.prices,
 		tiers: row.priceTiers,
 		variants: row.variants.map((v) => ({
@@ -251,7 +272,13 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 			manageStock: v.manageStock,
 			allowBackorder: v.allowBackorder,
 			lowStockThreshold: v.lowStockThreshold,
+			// All four, not just the weight: the editor writes null for a field
+			// the admin cleared, so a dimension the read omits would be wiped by
+			// the next save of a form that never showed it.
 			weightKg: v.weightKg,
+			lengthCm: v.lengthCm,
+			widthCm: v.widthCm,
+			heightCm: v.heightCm,
 			prices: v.prices,
 			tiers: v.priceTiers,
 			attributeValueIds: v.attributeValues.map((a) => a.attributeValueId),
@@ -357,11 +384,44 @@ const getBySlug = async (
 	return toPublicProduct(row, locale, role, quantity)
 }
 
+/**
+ * Stock is per variant, so a product's stock status is a statement about its
+ * variants as a set.
+ *
+ * IN_STOCK      — at least one variant can be bought right now.
+ * ON_BACKORDER  — at least one variant is empty but still orderable.
+ * OUT_OF_STOCK  — *every* variant is empty and none accepts backorders. Uses
+ *                 `every` rather than `some`, because a product with one sold-out
+ *                 variant and one in stock is still in stock.
+ */
+const stockWhere = (status: string): Prisma.ProductWhereInput => {
+	switch (status) {
+		case "IN_STOCK":
+			return { variants: { some: { OR: [{ manageStock: false }, { stock: { gt: 0 } }] } } }
+		case "ON_BACKORDER":
+			return {
+				variants: {
+					some: { manageStock: true, stock: { lte: 0 }, allowBackorder: true },
+				},
+			}
+		case "OUT_OF_STOCK":
+			return {
+				variants: {
+					every: { manageStock: true, stock: { lte: 0 }, allowBackorder: false },
+				},
+			}
+		default:
+			return {}
+	}
+}
+
 const adminList = async (params: {
 	locale: LocaleCode
 	kind?: string
 	status?: string
 	visibility?: string
+	categoryId?: string
+	stockStatus?: string
 	search?: string
 	page: number
 	limit: number
@@ -372,6 +432,10 @@ const adminList = async (params: {
 		...(params.visibility
 			? { visibility: params.visibility as "SHOP_AND_SEARCH" | "SHOP_ONLY" | "SEARCH_ONLY" | "HIDDEN" }
 			: {}),
+		// By id, not slug: the admin already holds ids, and a slug differs per
+		// language while an id does not.
+		...(params.categoryId ? { categories: { some: { categoryId: params.categoryId } } } : {}),
+		...(params.stockStatus ? stockWhere(params.stockStatus) : {}),
 		...(params.search
 			? {
 					OR: [
@@ -415,6 +479,31 @@ const adminGetById = async (id: string, locale: LocaleCode) => {
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────
+
+interface AttributeInput {
+	attributeId: string
+	attributeValueIds: string[]
+	isVisible?: boolean
+	isVariation?: boolean
+}
+
+/**
+ * `{ attributeId, values[], flags }` → one row per value.
+ *
+ * The join table is keyed on (product, attribute, value), so a three-value
+ * attribute is three rows. isVisible and isVariation describe the attribute
+ * rather than the value, so they are copied onto each row and read back from
+ * the first — grouping in the payload is what keeps them consistent.
+ */
+const expandAttributes = (input?: AttributeInput[]) =>
+	(input ?? []).flatMap((attribute) =>
+		attribute.attributeValueIds.map((attributeValueId) => ({
+			attributeId: attribute.attributeId,
+			attributeValueId,
+			isVisible: attribute.isVisible ?? true,
+			isVariation: attribute.isVariation ?? false,
+		}))
+	)
 
 interface TranslationInput {
 	locale: string
@@ -516,6 +605,7 @@ const create = async (payload: any, locale: LocaleCode) => {
 			status: payload.status,
 			visibility: payload.visibility,
 			quoteEnabled: payload.quoteEnabled,
+			taxStatus: payload.taxStatus,
 			moq: payload.moq,
 			sortOrder: payload.sortOrder,
 			featuredAssetId: payload.featuredAssetId ?? null,
@@ -529,6 +619,9 @@ const create = async (payload: any, locale: LocaleCode) => {
 					sortOrder: i,
 				})),
 			},
+			// One row per selected value; the flags belong to the attribute, so
+			// every row of an attribute carries the same pair.
+			attributes: { create: expandAttributes(payload.attributes) },
 			prices: { create: payload.prices ?? [] },
 			priceTiers: { create: payload.tiers ?? [] },
 			options: {
@@ -593,6 +686,7 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 				...(payload.status !== undefined ? { status: payload.status } : {}),
 				...(payload.visibility !== undefined ? { visibility: payload.visibility } : {}),
 				...(payload.quoteEnabled !== undefined ? { quoteEnabled: payload.quoteEnabled } : {}),
+				...(payload.taxStatus !== undefined ? { taxStatus: payload.taxStatus } : {}),
 				...(payload.moq !== undefined ? { moq: payload.moq } : {}),
 				...(payload.sortOrder !== undefined ? { sortOrder: payload.sortOrder } : {}),
 				...(payload.featuredAssetId !== undefined
@@ -623,6 +717,15 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 					metaTitle: t.metaTitle ?? null,
 					metaDescription: t.metaDescription ?? null,
 				},
+			})
+		}
+
+		if (payload.attributes) {
+			// Replaced wholesale, like categories: the payload is the complete set
+			// of attributes for this product.
+			await tx.productAttribute.deleteMany({ where: { productId: id } })
+			await tx.productAttribute.createMany({
+				data: expandAttributes(payload.attributes).map((row) => ({ ...row, productId: id })),
 			})
 		}
 
@@ -667,26 +770,50 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 		}
 
 		for (const v of payload.variants ?? []) {
-			const data = {
+			/**
+			 * Only keys the caller actually sent.
+			 *
+			 * `?? default` would turn every omitted field into an overwrite — an
+			 * update that never mentioned stock would silently set it to 0. A new
+			 * variant still needs the defaults, so those are applied on the create
+			 * branch only.
+			 */
+			const patch = {
 				sku: v.sku,
-				isDefault: v.isDefault ?? false,
-				isActive: v.isActive ?? true,
-				sortOrder: v.sortOrder ?? 0,
-				moq: v.moq ?? null,
-				manageStock: v.manageStock ?? true,
-				stock: v.stock ?? 0,
-				allowBackorder: v.allowBackorder ?? false,
-				lowStockThreshold: v.lowStockThreshold ?? null,
-				weightKg: v.weightKg ?? null,
-				lengthCm: v.lengthCm ?? null,
-				widthCm: v.widthCm ?? null,
-				heightCm: v.heightCm ?? null,
-				imageAssetId: v.imageAssetId ?? null,
+				...(v.isDefault !== undefined ? { isDefault: v.isDefault } : {}),
+				...(v.isActive !== undefined ? { isActive: v.isActive } : {}),
+				...(v.sortOrder !== undefined ? { sortOrder: v.sortOrder } : {}),
+				...(v.moq !== undefined ? { moq: v.moq } : {}),
+				...(v.manageStock !== undefined ? { manageStock: v.manageStock } : {}),
+				...(v.stock !== undefined ? { stock: v.stock } : {}),
+				...(v.allowBackorder !== undefined ? { allowBackorder: v.allowBackorder } : {}),
+				...(v.lowStockThreshold !== undefined
+					? { lowStockThreshold: v.lowStockThreshold }
+					: {}),
+				...(v.weightKg !== undefined ? { weightKg: v.weightKg } : {}),
+				...(v.lengthCm !== undefined ? { lengthCm: v.lengthCm } : {}),
+				...(v.widthCm !== undefined ? { widthCm: v.widthCm } : {}),
+				...(v.heightCm !== undefined ? { heightCm: v.heightCm } : {}),
+				...(v.imageAssetId !== undefined ? { imageAssetId: v.imageAssetId } : {}),
 			}
 
 			const variantId: string = v.id
-				? (await tx.productVariant.update({ where: { id: v.id }, data })).id
-				: (await tx.productVariant.create({ data: { ...data, productId: id } })).id
+				? (await tx.productVariant.update({ where: { id: v.id }, data: patch })).id
+				: (
+						await tx.productVariant.create({
+							data: {
+								isDefault: false,
+								isActive: true,
+								sortOrder: 0,
+								moq: null,
+								manageStock: true,
+								stock: 0,
+								allowBackorder: false,
+								...patch,
+								productId: id,
+							},
+						})
+					).id
 
 			if (v.prices) {
 				await tx.variantPrice.deleteMany({ where: { variantId } })

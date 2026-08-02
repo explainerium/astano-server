@@ -40,6 +40,21 @@ enum ProductVisibility {
   HIDDEN
 }
 
+/// WooCommerce's "Tax status", kept separate from the tax *class*.
+///
+/// Status decides *whether* tax applies at all; class decides *which rate* when
+/// it does. Merging them would make "not taxed" a rate of zero, which is a
+/// different statement on an invoice — a zero-rated line is still a taxable
+/// supply, and the invoice has to be able to say why.
+enum TaxStatus {
+  /// Product and its shipping are both taxed.
+  TAXABLE
+  /// Only the shipping portion is taxed, not the goods.
+  SHIPPING_ONLY
+  /// Neither is taxed.
+  NONE
+}
+
 model Category {
   id       String  @id @default(uuid())
   parentId String?
@@ -109,6 +124,10 @@ model Product {
   /// Minimum order quantity. One value per product for every customer type,
   /// identical in all languages, overridable per variant (R3). 0 = disabled.
   moq Int @default(0)
+
+  /// Whether this product is taxed at all — WooCommerce's "Tax status".
+  /// Separate from the tax *class*, which decides the rate when it is taxed.
+  taxStatus TaxStatus @default(TAXABLE)
 
   /// Which tax class applies. Null falls back to the class marked isDefault.
   taxClassId String?

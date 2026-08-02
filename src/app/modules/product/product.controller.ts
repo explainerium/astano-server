@@ -61,6 +61,8 @@ const adminList: RequestHandler = catchAsync(async (req, res) => {
 		kind?: string
 		status?: string
 		visibility?: string
+		categoryId?: string
+		stockStatus?: string
 		search?: string
 		page?: number
 		limit?: number
@@ -71,6 +73,8 @@ const adminList: RequestHandler = catchAsync(async (req, res) => {
 		kind: q.kind,
 		status: q.status,
 		visibility: q.visibility,
+		categoryId: q.categoryId,
+		stockStatus: q.stockStatus,
 		search: q.search,
 		page: Number(q.page ?? 1),
 		limit: Number(q.limit ?? 50),
