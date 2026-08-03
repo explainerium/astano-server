@@ -71,6 +71,17 @@ model TaxRate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// ⚠️ Carries `NULLS NOT DISTINCT` in the database — see migration
+  /// 20260803120000. Prisma cannot express that here, so this line understates
+  /// what the index does.
+  ///
+  /// Without it the index constrains nothing in the normal case: `state` is
+  /// NULL for any rate covering a whole country, and SQL never treats NULL as
+  /// equal to NULL, so duplicate rates were accepted. resolveTax() sums *every*
+  /// matching rate, so a duplicated 19% row taxed a German order at 38%.
+  ///
+  /// If this index is ever dropped and recreated from the schema alone, the
+  /// clause is lost and the bug returns silently.
   @@unique([taxClassId, countryCode, state, priority])
   @@index([countryCode])
   @@map("tax_rates")

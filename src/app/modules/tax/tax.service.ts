@@ -16,6 +16,10 @@ const view = (row: ClassRow, locale: LocaleCode) => ({
 	isDefault: row.isDefault,
 	sortOrder: row.sortOrder,
 	name: pick(row.translations, locale)?.name ?? row.code,
+	// Every locale, not just the resolved one. `name` is for display; the admin
+	// editor needs all of them or the German name is invisible and uneditable —
+	// the same reason staff category reads carry full translations.
+	translations: row.translations.map((t) => ({ locale: t.locale, name: t.name })),
 	rates: row.rates.map((r) => ({
 		id: r.id,
 		countryCode: r.countryCode,
@@ -31,6 +35,47 @@ const view = (row: ClassRow, locale: LocaleCode) => ({
 
 const notFound = (key = "tax.classNotFound") =>
 	new ApiError(httpStatus.NOT_FOUND, "Not found", { messageKey: key })
+
+/**
+ * Refuses a second rate for the same destination in the same class.
+ *
+ * The database enforces this too — the unique index carries NULLS NOT DISTINCT
+ * so that whole-country rates, whose `state` is null, actually collide. This
+ * check exists on top of it purely for the message: a raw P2002 says "another
+ * record already uses that country code", which does not tell an admin *which*
+ * rate is in the way or that priority is part of the key.
+ *
+ * It is not a substitute for the index. Two simultaneous requests can both pass
+ * this and only one will survive the insert, which is exactly what the index is
+ * there for — duplicated rates are summed by resolveTax(), not deduplicated.
+ */
+const assertNoClash = async (where: {
+	taxClassId: string
+	countryCode: string
+	state: string | null
+	priority: number
+	exceptId?: string
+}) => {
+	const clash = await prisma.taxRate.findFirst({
+		where: {
+			taxClassId: where.taxClassId,
+			countryCode: where.countryCode,
+			state: where.state,
+			priority: where.priority,
+			...(where.exceptId ? { id: { not: where.exceptId } } : {}),
+		},
+	})
+
+	if (!clash) return
+
+	throw new ApiError(httpStatus.CONFLICT, "Duplicate tax rate", {
+		messageKey: "tax.duplicateRate",
+		messageVars: {
+			country: where.countryCode,
+			priority: String(where.priority),
+		},
+	})
+}
 
 const listClasses = async (locale: LocaleCode) => {
 	const rows = await prisma.taxClass.findMany({ include, orderBy: { sortOrder: "asc" } })
@@ -139,6 +184,13 @@ const createRate = async (payload: {
 }) => {
 	if (!(await prisma.taxClass.findUnique({ where: { id: payload.taxClassId } }))) throw notFound()
 
+	await assertNoClash({
+		taxClassId: payload.taxClassId,
+		countryCode: payload.countryCode,
+		state: payload.state ?? null,
+		priority: payload.priority ?? 1,
+	})
+
 	const row = await prisma.taxRate.create({
 		data: {
 			taxClassId: payload.taxClassId,
@@ -157,7 +209,20 @@ const createRate = async (payload: {
 }
 
 const updateRate = async (id: string, payload: Record<string, unknown>) => {
-	if (!(await prisma.taxRate.findUnique({ where: { id } }))) throw notFound("tax.rateNotFound")
+	const current = await prisma.taxRate.findUnique({ where: { id } })
+	if (!current) throw notFound("tax.rateNotFound")
+
+	// Checked against the values the row will *have*, not the ones it arrived
+	// with. `state` is compared with an explicit undefined test because null is
+	// a meaningful value here — it means "the whole country" — and `??` would
+	// mistake clearing the region for leaving it alone.
+	await assertNoClash({
+		taxClassId: current.taxClassId,
+		countryCode: (payload.countryCode as string | undefined) ?? current.countryCode,
+		state: payload.state !== undefined ? (payload.state as string | null) : current.state,
+		priority: (payload.priority as number | undefined) ?? current.priority,
+		exceptId: id,
+	})
 
 	const row = await prisma.taxRate.update({
 		where: { id },

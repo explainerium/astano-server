@@ -245,6 +245,11 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 		// no way to show which images a product already had.
 		featuredAssetId: row.featuredAssetId,
 		assetIds: row.assets.map((a) => a.assetId),
+		// The ids are what the editor writes back; these are what it draws with.
+		// Without them it would have to re-fetch every asset one by one just to
+		// show a thumbnail this query has already loaded.
+		featuredImage: toImage(row.featuredAsset),
+		images: row.assets.map((a) => toImage(a.asset)).filter((image) => image !== null),
 		// Rows regrouped back to one entry per attribute, mirroring the payload.
 		attributes: [
 			...row.attributes
@@ -733,6 +738,21 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 			await tx.productCategory.deleteMany({ where: { productId: id } })
 			await tx.productCategory.createMany({
 				data: payload.categoryIds.map((categoryId: string) => ({ productId: id, categoryId })),
+			})
+		}
+
+		// The gallery is an ordered list, so the array's own order becomes
+		// sortOrder — that is what the editor's reorder buttons actually change.
+		// Create accepted assetIds from the start; without this, a gallery could
+		// be set once and never edited again.
+		if (payload.assetIds) {
+			await tx.productAsset.deleteMany({ where: { productId: id } })
+			await tx.productAsset.createMany({
+				data: payload.assetIds.map((assetId: string, i: number) => ({
+					productId: id,
+					assetId,
+					sortOrder: i,
+				})),
 			})
 		}
 

@@ -90,6 +90,7 @@
 	"tax.rateCreated": "Tax rate created.",
 	"tax.rateUpdated": "Tax rate updated.",
 	"tax.rateDeleted": "Tax rate deleted.",
+	"tax.duplicateRate": "This class already has a rate for {country} at priority {priority}. Edit that one, or give this rate a different priority so both apply.",
 	"shipping.zoneNotFound": "Shipping zone not found.",
 	"shipping.methodNotFound": "Shipping method not found.",
 	"shipping.zoneCreated": "Shipping zone created.",

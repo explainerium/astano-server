@@ -90,6 +90,7 @@
 	"tax.rateCreated": "Steuersatz erstellt.",
 	"tax.rateUpdated": "Steuersatz aktualisiert.",
 	"tax.rateDeleted": "Steuersatz gelöscht.",
+	"tax.duplicateRate": "Diese Klasse hat bereits einen Steuersatz für {country} mit Priorität {priority}. Bearbeiten Sie diesen oder vergeben Sie eine andere Priorität, damit beide gelten.",
 	"shipping.zoneNotFound": "Versandzone nicht gefunden.",
 	"shipping.methodNotFound": "Versandart nicht gefunden.",
 	"shipping.zoneCreated": "Versandzone erstellt.",
