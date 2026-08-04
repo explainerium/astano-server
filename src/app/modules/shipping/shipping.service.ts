@@ -23,6 +23,10 @@ const view = (row: ZoneRow, locale: LocaleCode) => ({
 	id: row.id,
 	code: row.code,
 	name: pick(row.translations, locale)?.name ?? row.code,
+	// Every locale, not just the resolved one: `name` is for display, but the
+	// admin editor needs all of them or the German name is invisible and
+	// uneditable. Same reason staff category and tax-class reads carry them.
+	translations: row.translations.map((t) => ({ locale: t.locale, name: t.name })),
 	sortOrder: row.sortOrder,
 	isActive: row.isActive,
 	countries: row.countries.map((c) => c.countryCode),
@@ -32,6 +36,11 @@ const view = (row: ZoneRow, locale: LocaleCode) => ({
 		type: m.type,
 		name: pick(m.translations, locale)?.name ?? m.code,
 		description: pick(m.translations, locale)?.description ?? null,
+		translations: m.translations.map((t) => ({
+			locale: t.locale,
+			name: t.name,
+			description: t.description,
+		})),
 		flatCost: m.flatCost?.toString() ?? null,
 		freeAboveSubtotal: m.freeAboveSubtotal?.toString() ?? null,
 		taxable: m.taxable,
