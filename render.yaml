@@ -23,9 +23,15 @@ services:
     branch: main
     rootDir: .
 
-    # `prisma generate` must run every build — Render builds from a clean
-    # cache and the generated client is not committed.
-    buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
+    # `--include=dev` is not optional here. NODE_ENV=production (set below, and
+    # needed at runtime) makes npm skip devDependencies — and TypeScript plus
+    # every @types/* package lives there. Without it the build fails with a
+    # hundred "Could not find a declaration file for module 'express'" errors,
+    # which reads like missing packages rather than a skipped install.
+    #
+    # `prisma generate` must run every build: Render builds from a clean cache
+    # and the generated client is not committed.
+    buildCommand: npm ci --include=dev && npx prisma generate && npx prisma migrate deploy && npm run build
 
     startCommand: npm start
 
