@@ -1,7 +1,6 @@
 import { Router } from "express"
 import type { Request, Response } from "express"
 import { z } from "zod"
-import { env } from "../../../config"
 import { catchAsync } from "../../../shared/catchAsync"
 import { httpStatus } from "../../../shared/httpStatus"
 import { sendResponse } from "../../../shared/sendResponse"
@@ -9,6 +8,7 @@ import { t } from "../../../i18n"
 import { optionalAuth } from "../../middlewares/optionalAuth"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { WishlistService, type Owner } from "./wishlist.service"
+import { clearCookieOptions, cookieOptions } from "../../../shared/cookies"
 
 const WISHLIST_COOKIE = "astano_wishlist"
 const TTL_DAYS = 180
@@ -22,15 +22,9 @@ const ownerOf = (req: Request): Owner => ({
 
 const syncCookie = (res: Response, token: string | null): void => {
 	if (token) {
-		res.cookie(WISHLIST_COOKIE, token, {
-			httpOnly: true,
-			secure: env.NODE_ENV === "production",
-			sameSite: "lax",
-			maxAge: TTL_DAYS * 24 * 60 * 60 * 1000,
-			path: "/",
-		})
+		res.cookie(WISHLIST_COOKIE, token, cookieOptions(TTL_DAYS * 24 * 60 * 60 * 1000))
 	} else {
-		res.clearCookie(WISHLIST_COOKIE, { path: "/" })
+		res.clearCookie(WISHLIST_COOKIE, clearCookieOptions())
 	}
 }
 

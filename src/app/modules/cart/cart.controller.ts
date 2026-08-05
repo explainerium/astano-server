@@ -1,11 +1,11 @@
 import type { Request, RequestHandler, Response } from "express"
-import { env } from "../../../config"
 import { catchAsync } from "../../../shared/catchAsync"
 import { httpStatus } from "../../../shared/httpStatus"
 import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import { CART_COOKIE, GUEST_CART_TTL_DAYS } from "./cart.constant"
 import { CartService, type CartOwner } from "./cart.service"
+import { clearCookieOptions, cookieOptions } from "../../../shared/cookies"
 
 const ownerOf = (req: Request): CartOwner => ({
 	userId: req.user?.sub,
@@ -21,15 +21,9 @@ const ownerOf = (req: Request): CartOwner => ({
  */
 const syncCookie = (res: Response, token: string | null): void => {
 	if (token) {
-		res.cookie(CART_COOKIE, token, {
-			httpOnly: true,
-			secure: env.NODE_ENV === "production",
-			sameSite: "lax",
-			maxAge: GUEST_CART_TTL_DAYS * 24 * 60 * 60 * 1000,
-			path: "/",
-		})
+		res.cookie(CART_COOKIE, token, cookieOptions(GUEST_CART_TTL_DAYS * 24 * 60 * 60 * 1000))
 	} else {
-		res.clearCookie(CART_COOKIE, { path: "/" })
+		res.clearCookie(CART_COOKIE, clearCookieOptions())
 	}
 }
 

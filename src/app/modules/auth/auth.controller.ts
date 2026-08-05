@@ -8,15 +8,10 @@ import { durationToMs } from "../../../shared/token"
 import { t } from "../../../i18n"
 import { REFRESH_COOKIE } from "./auth.constant"
 import { AuthService } from "./auth.service"
+import { cookieOptions } from "../../../shared/cookies"
 
 const setRefreshCookie = (res: Response, token: string): void => {
-	res.cookie(REFRESH_COOKIE, token, {
-		httpOnly: true,
-		secure: env.NODE_ENV === "production",
-		sameSite: "lax",
-		maxAge: durationToMs(env.JWT_REFRESH_EXPIRES_IN),
-		path: "/",
-	})
+	res.cookie(REFRESH_COOKIE, token, cookieOptions(durationToMs(env.JWT_REFRESH_EXPIRES_IN)))
 }
 
 const device = (req: Request) => ({

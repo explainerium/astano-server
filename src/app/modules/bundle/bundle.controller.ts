@@ -1,5 +1,4 @@
 import type { Request, RequestHandler, Response } from "express"
-import { env } from "../../../config"
 import { catchAsync } from "../../../shared/catchAsync"
 import { httpStatus } from "../../../shared/httpStatus"
 import { sendResponse } from "../../../shared/sendResponse"
@@ -7,6 +6,7 @@ import { t } from "../../../i18n"
 import { CART_COOKIE } from "../cart/cart.constant"
 import { CartService } from "../cart/cart.service"
 import { BundleService } from "./bundle.service"
+import { cookieOptions } from "../../../shared/cookies"
 
 const ownerOf = (req: Request) => ({
 	userId: req.user?.sub,
@@ -17,13 +17,7 @@ const ownerOf = (req: Request) => ({
 
 const syncCookie = (res: Response, token: string | null): void => {
 	if (token) {
-		res.cookie(CART_COOKIE, token, {
-			httpOnly: true,
-			secure: env.NODE_ENV === "production",
-			sameSite: "lax",
-			maxAge: 30 * 24 * 60 * 60 * 1000,
-			path: "/",
-		})
+		res.cookie(CART_COOKIE, token, cookieOptions(30 * 24 * 60 * 60 * 1000))
 	}
 }
 

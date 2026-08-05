@@ -1,0 +1,107 @@
+# Render blueprint for the astano API.
+#
+# Deploy with: New → Blueprint → point at this repo.
+# Everything marked `sync: false` must be filled in from the Render dashboard;
+# nothing secret belongs in this file.
+
+services:
+  - type: web
+    name: astano-api
+    runtime: node
+    plan: starter # free tier sleeps after 15 min, which makes the first
+      # request of a test session take ~50s. Starter avoids that.
+    region: frankfurt # closest to the customers and to the database
+    branch: main
+    rootDir: .
+
+    # `prisma generate` must run on every build: Render installs from a clean
+    # cache, and the generated client is not committed.
+    buildCommand: npm ci && npx prisma generate && npm run build
+
+    # Runs after the build, before traffic switches over. Migrations belong
+    # here rather than in the start command, which would run them once per
+    # instance on every restart.
+    preDeployCommand: npx prisma migrate deploy
+
+    startCommand: npm start
+
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render supplies PORT; the app already reads it.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: astano-db
+          property: connectionString
+
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+      # ── The two that decide whether guest carts work ────────────────────
+      #
+      # A Vercel frontend and a Render API are different sites, so every API
+      # call is cross-site and a SameSite=Lax cookie is silently dropped —
+      # the basket empties itself between page loads with nothing in any log.
+      - key: COOKIE_SAMESITE
+        value: none
+      - key: COOKIE_SECURE
+        value: "true"
+
+      # Comma-separated, no trailing slash, exact scheme+host.
+      # e.g. https://astano.vercel.app,https://astano-git-main-you.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+
+      # Where this API is reachable — used to build media URLs.
+      # e.g. https://astano-api.onrender.com
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+      # Render's filesystem is ephemeral: with the local driver every uploaded
+      # product image disappears on the next deploy. Use r2 for anything that
+      # has to survive.
+      - key: STORAGE_DRIVER
+        value: r2
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_MEDIA
+        sync: false
+      - key: R2_BUCKET_FILES
+        sync: false
+      - key: R2_PUBLIC_URL
+        sync: false
+
+      # Without these, order confirmations and password resets send from
+      # nothing. MAIL_FROM must be an address the SMTP host will accept.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+
+      - key: LOG_LEVEL
+        value: info
+
+      # Puppeteer ships its own Chromium and needs it present at runtime for
+      # invoice PDFs. Render's Node runtime keeps the download, so the default
+      # (unset) is correct — do not set PUPPETEER_SKIP_DOWNLOAD.
+
+databases:
+  - name: astano-db
+    databaseName: astano
+    plan: basic-256mb
+    region: frankfurt

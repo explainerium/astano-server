@@ -42,9 +42,43 @@ const envSchema = z.object({
 
 	CORS_ORIGINS: z.string().default("http://localhost:3000"),
 	LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+
+	/**
+	 * Cookie policy for the guest-session cookies (cart, quote basket,
+	 * wishlist, configurator) and the refresh token.
+	 *
+	 * This is a deployment fact, not a code decision. When the site and the API
+	 * share a registrable domain — astano.de and api.astano.de — "lax" is right
+	 * and is the safer default. When they do not — a Vercel frontend calling a
+	 * Render backend — the browser treats every API call as cross-site and
+	 * silently drops a "lax" cookie, so a guest's basket empties itself between
+	 * requests with nothing in any log to explain it.
+	 */
+	COOKIE_SAMESITE: z.enum(["lax", "none", "strict"]).default("lax"),
+	COOKIE_SECURE: z
+		.enum(["true", "false"])
+		.optional()
+		.transform((value) => value === "true"),
+	/// Set to share cookies across subdomains, e.g. ".astano.de". Leave unset otherwise.
+	COOKIE_DOMAIN: z.string().optional(),
 })
 
-const parsed = envSchema.safeParse(process.env)
+const parsed = envSchema
+	.transform((values) => ({
+		...values,
+		// Unset means "secure in production" — the previous hardcoded behaviour.
+		COOKIE_SECURE: values.COOKIE_SECURE ?? values.NODE_ENV === "production",
+	}))
+	/**
+	 * A browser rejects `SameSite=None` outright unless the cookie is also
+	 * `Secure`. Getting this pair wrong produces no error anywhere — the cookie
+	 * is simply never stored — so it is refused at boot instead.
+	 */
+	.refine((values) => values.COOKIE_SAMESITE !== "none" || values.COOKIE_SECURE, {
+		message: "COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers drop the cookie otherwise)",
+		path: ["COOKIE_SAMESITE"],
+	})
+	.safeParse(process.env)
 
 if (!parsed.success) {
 	// Fail loudly and readably — this is the first thing a new developer sees.

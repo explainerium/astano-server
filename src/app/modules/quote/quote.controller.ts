@@ -7,6 +7,7 @@ import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import { GUEST_BASKET_TTL_DAYS, QUOTE_BASKET_COOKIE } from "./quote.constant"
 import { QuoteService, type BasketOwner } from "./quote.service"
+import { clearCookieOptions, cookieOptions } from "../../../shared/cookies"
 
 const ownerOf = (req: Request): BasketOwner => ({
 	userId: req.user?.sub,
@@ -15,15 +16,9 @@ const ownerOf = (req: Request): BasketOwner => ({
 
 const syncCookie = (res: Response, token: string | null): void => {
 	if (token) {
-		res.cookie(QUOTE_BASKET_COOKIE, token, {
-			httpOnly: true,
-			secure: env.NODE_ENV === "production",
-			sameSite: "lax",
-			maxAge: GUEST_BASKET_TTL_DAYS * 24 * 60 * 60 * 1000,
-			path: "/",
-		})
+		res.cookie(QUOTE_BASKET_COOKIE, token, cookieOptions(GUEST_BASKET_TTL_DAYS * 24 * 60 * 60 * 1000))
 	} else {
-		res.clearCookie(QUOTE_BASKET_COOKIE, { path: "/" })
+		res.clearCookie(QUOTE_BASKET_COOKIE, clearCookieOptions())
 	}
 }
 
