@@ -17,7 +17,12 @@ coverage/
 
 # Local media driver target — product images and, in the private bucket,
 # customer design files (PDF/EPS/AI/STL/STP). Never commit either (R12).
-storage/
+#
+# The leading slash anchors this to the repo root. Without it the pattern
+# matches a `storage` directory at ANY depth, which silently swallowed
+# src/helpers/storage/ — the whole storage abstraction was never committed,
+# and the first clean clone would have failed to build.
+/storage/
 
 # Generated invoices and test renders.
 invoice-*.pdf

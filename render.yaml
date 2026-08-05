@@ -1,27 +1,31 @@
-# Render blueprint for the astano API.
+# Render blueprint for the astano API — free-tier testing setup.
 #
 # Deploy with: New → Blueprint → point at this repo.
-# Everything marked `sync: false` must be filled in from the Render dashboard;
+# Everything marked `sync: false` is filled in from the Render dashboard;
 # nothing secret belongs in this file.
+#
+# ── Two deliberate choices for the free tier ────────────────────────────────
+#
+# 1. No `databases:` block. Render's free Postgres expires, and losing the
+#    database mid-test is worse than one extra signup. Use Neon (or any hosted
+#    Postgres) and paste its connection string into DATABASE_URL.
+#
+# 2. Migrations run in the build command, not `preDeployCommand`. Pre-deploy
+#    commands need a paid instance type. `migrate deploy` is idempotent, so
+#    running it every build is safe.
 
 services:
   - type: web
     name: astano-api
     runtime: node
-    plan: starter # free tier sleeps after 15 min, which makes the first
-      # request of a test session take ~50s. Starter avoids that.
-    region: frankfurt # closest to the customers and to the database
+    plan: free # sleeps after ~15 min idle; the next request takes ~50s
+    region: frankfurt
     branch: main
     rootDir: .
 
-    # `prisma generate` must run on every build: Render installs from a clean
-    # cache, and the generated client is not committed.
-    buildCommand: npm ci && npx prisma generate && npm run build
-
-    # Runs after the build, before traffic switches over. Migrations belong
-    # here rather than in the start command, which would run them once per
-    # instance on every restart.
-    preDeployCommand: npx prisma migrate deploy
+    # `prisma generate` must run every build — Render builds from a clean
+    # cache and the generated client is not committed.
+    buildCommand: npm ci && npx prisma generate && npx prisma migrate deploy && npm run build
 
     startCommand: npm start
 
@@ -32,10 +36,11 @@ services:
         value: production
 
       # Render supplies PORT; the app already reads it.
+
+      # Neon connection string. Keep the ?sslmode=require Neon gives you —
+      # Prisma needs it.
       - key: DATABASE_URL
-        fromDatabase:
-          name: astano-db
-          property: connectionString
+        sync: false
 
       - key: JWT_ACCESS_SECRET
         generateValue: true
@@ -47,12 +52,15 @@ services:
       # A Vercel frontend and a Render API are different sites, so every API
       # call is cross-site and a SameSite=Lax cookie is silently dropped —
       # the basket empties itself between page loads with nothing in any log.
+      #
+      # On the Hostinger VPS later, where both sit on one domain, set this
+      # back to `lax`.
       - key: COOKIE_SAMESITE
         value: none
       - key: COOKIE_SECURE
         value: "true"
 
-      # Comma-separated, no trailing slash, exact scheme+host.
+      # Comma-separated, exact scheme + host, no trailing slash.
       # e.g. https://astano.vercel.app,https://astano-git-main-you.vercel.app
       - key: CORS_ORIGINS
         sync: false
@@ -63,12 +71,13 @@ services:
         sync: false
 
       # Render's filesystem is ephemeral: with the local driver every uploaded
-      # product image disappears on the next deploy. Use r2 for anything that
-      # has to survive.
+      # product image disappears on the next deploy.
+      #
+      # The driver is plain S3. Cloudflare R2 asks for a card even on its free
+      # tier, so for a card-free test deployment use Supabase Storage and set
+      # S3_ENDPOINT / S3_FORCE_PATH_STYLE below.
       - key: STORAGE_DRIVER
         value: r2
-      - key: R2_ACCOUNT_ID
-        sync: false
       - key: R2_ACCESS_KEY_ID
         sync: false
       - key: R2_SECRET_ACCESS_KEY
@@ -78,6 +87,16 @@ services:
       - key: R2_BUCKET_FILES
         sync: false
       - key: R2_PUBLIC_URL
+        sync: false
+      # Cloudflare R2 only — leave unset when S3_ENDPOINT is set.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      # Everything else — e.g. https://<ref>.supabase.co/storage/v1/s3
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
         sync: false
 
       # Without these, order confirmations and password resets send from
@@ -96,12 +115,8 @@ services:
       - key: LOG_LEVEL
         value: info
 
-      # Puppeteer ships its own Chromium and needs it present at runtime for
-      # invoice PDFs. Render's Node runtime keeps the download, so the default
-      # (unset) is correct — do not set PUPPETEER_SKIP_DOWNLOAD.
-
-databases:
-  - name: astano-db
-    databaseName: astano
-    plan: basic-256mb
-    region: frankfurt
+      # Puppeteer ships its own Chromium for invoice PDFs. On a 512 MB free
+      # instance launching it may run the process out of memory — see
+      # DEPLOYMENT.md. Leave the download enabled; if invoices are not needed
+      # for this round of testing, that is the one feature to expect trouble
+      # from.

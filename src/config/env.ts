@@ -25,13 +25,35 @@ const envSchema = z.object({
 	/// the R2_* values below.
 	STORAGE_DRIVER: z.enum(["local", "r2"]).default("local"),
 
-	// Cloudflare R2.
+	/**
+	 * Object storage credentials.
+	 *
+	 * The R2_ prefix is historical — the driver speaks plain S3, so these work
+	 * for Cloudflare R2, Supabase Storage, Backblaze B2, MinIO or anything else
+	 * S3-compatible. Only the endpoint differs, and that is set below.
+	 */
 	R2_ACCOUNT_ID: z.string().optional(),
 	R2_ACCESS_KEY_ID: z.string().optional(),
 	R2_SECRET_ACCESS_KEY: z.string().optional(),
 	R2_BUCKET_MEDIA: z.string().optional(),
 	R2_BUCKET_FILES: z.string().optional(),
 	R2_PUBLIC_URL: z.string().optional(),
+
+	/**
+	 * Override the S3 endpoint to use a provider other than R2.
+	 *
+	 * Unset  → Cloudflare R2, derived from R2_ACCOUNT_ID.
+	 * Set    → that endpoint verbatim, e.g. Supabase Storage:
+	 *          https://<project-ref>.supabase.co/storage/v1/s3
+	 *
+	 * Most non-AWS providers need path-style addressing; R2 accepts either.
+	 */
+	S3_ENDPOINT: z.string().optional(),
+	S3_REGION: z.string().default("auto"),
+	S3_FORCE_PATH_STYLE: z
+		.enum(["true", "false"])
+		.default("false")
+		.transform((value) => value === "true"),
 
 	// Mail — optional until the order module lands (Phase 3).
 	SMTP_HOST: z.string().optional(),
