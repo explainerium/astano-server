@@ -26,7 +26,9 @@ import type { PricingRole } from "../pricing/effectiveRole"
 export interface ConfigurableLine {
 	/// Identifies the line back to the caller — a variant id in practice.
 	variantId: string
-	sku: string
+	/// Null for a product whose owner never gave it one. `variantId` is what
+	/// identifies the line; this is only ever shown to a human.
+	sku: string | null
 	name: string
 	quantity: number
 	productMoq: number
@@ -40,7 +42,8 @@ export interface ConfigurableLine {
 
 export interface PricedLine {
 	variantId: string
-	sku: string
+	/// Carried through from the input line — null for a product with no SKU.
+	sku: string | null
 	name: string
 	quantity: number
 	moq: number
@@ -125,12 +128,17 @@ export const priceBundle = (input: PriceBundleInput): PricedBundle => {
 	const issues: PricedBundle["issues"] = []
 
 	for (const line of [main, ...options]) {
+		// Names the offending line for the caller's error message. SKU when there
+		// is one, otherwise the product name — `name` is always populated, so an
+		// issue always identifies something a human can act on.
+		const label = line.sku ?? line.name
+
 		if (line.quoteOnly) {
-			issues.push({ line: line.sku, problem: "QUOTE_ONLY" })
+			issues.push({ line: label, problem: "QUOTE_ONLY" })
 			continue
 		}
-		if (line.belowMoq) issues.push({ line: line.sku, problem: "BELOW_MOQ", moq: line.moq })
-		if (line.lineTotal === null) issues.push({ line: line.sku, problem: "NO_PRICE" })
+		if (line.belowMoq) issues.push({ line: label, problem: "BELOW_MOQ", moq: line.moq })
+		if (line.lineTotal === null) issues.push({ line: label, problem: "NO_PRICE" })
 	}
 
 	const subtotal = [main, ...options].reduce(

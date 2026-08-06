@@ -90,6 +90,9 @@ model User {
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
 
+  /// Products this staff account created. See Product.createdBy.
+  productsCreated Product[] @relation("ProductAuthor")
+
   @@index([role, status])
   @@map("users")
 }

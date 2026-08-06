@@ -14,6 +14,19 @@ import ApiError from "../../errors/ApiError"
 const pick = <T extends { locale: string }>(rows: T[], locale: LocaleCode): T | undefined =>
 	rows.find((r) => r.locale === locale) ?? rows.find((r) => r.locale === DEFAULT_LOCALE) ?? rows[0]
 
+/**
+ * How to name a variant in a message to a customer.
+ *
+ * SKU first — it is what appears on the cart line they are being asked to fix —
+ * then the product name for the products that have no SKU. Reads correctly
+ * either way: every message using this interpolates a bare identifier
+ * ("{sku} is no longer available"), never the literal word "SKU".
+ */
+const labelFor = (
+	variant: { sku: string | null; product: { translations: { locale: string; name: string }[] } },
+	locale: LocaleCode
+): string => variant.sku ?? pick(variant.product.translations, locale)?.name ?? "This item"
+
 const toPriceInputs = (
 	prices: { role: string; basePrice: unknown; salePrice: unknown; saleStartsAt: Date | null; saleEndsAt: Date | null }[],
 	tiers: { role: string; minQuantity: number; type: string; value: unknown }[]
@@ -49,7 +62,7 @@ const toLine = (
 ): ConfigurableLine => ({
 	variantId: variant.id,
 	sku: variant.sku,
-	name: pick(variant.product.translations, locale)?.name ?? variant.sku,
+	name: pick(variant.product.translations, locale)?.name ?? variant.sku ?? "(untitled)",
 	quantity,
 	productMoq: variant.product.moq,
 	variantMoq: variant.moq,
@@ -117,7 +130,7 @@ const loadConfiguration = async (
 		if (!entry.variant.isActive || entry.variant.product.status !== "PUBLISHED") {
 			throw new ApiError(httpStatus.CONFLICT, "An option is no longer available", {
 				messageKey: "bundle.optionUnavailable",
-				messageVars: { sku: entry.variant.sku },
+				messageVars: { sku: labelFor(entry.variant, locale) },
 			})
 		}
 

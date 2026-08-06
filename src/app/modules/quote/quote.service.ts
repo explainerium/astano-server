@@ -368,7 +368,15 @@ const submit = async (
 		if (isBelowMoq(item.quantity, moq)) {
 			throw new ApiError(httpStatus.CONFLICT, "A line is below its minimum order quantity", {
 				messageKey: "quote.submitBelowMoq",
-				messageVars: { sku: item.variant.sku, moq: String(moq) },
+				// SKU if the product has one, otherwise its name. The message
+				// interpolates a bare identifier, so either reads correctly.
+				messageVars: {
+					sku:
+						item.variant.sku ??
+						pick(item.variant.product.translations, locale)?.name ??
+						"This item",
+					moq: String(moq),
+				},
 			})
 		}
 	}
@@ -406,9 +414,14 @@ const submit = async (
 					create: basket.items.map((item) => ({
 						variantId: item.variantId,
 						productId: item.variant.productId,
-						sku: item.variant.sku,
+						// Empty, not null: the snapshot column is non-null and a real
+						// SKU is never blank, so "" unambiguously records "had none
+						// at the time".
+						sku: item.variant.sku ?? "",
 						name:
-							pick(item.variant.product.translations, locale)?.name ?? item.variant.sku,
+							pick(item.variant.product.translations, locale)?.name ??
+							item.variant.sku ??
+							"(untitled)",
 						attributes: item.variant.attributeValues.map(
 							(av) =>
 								pick(av.attributeValue.translations, locale)?.label ?? av.attributeValue.code

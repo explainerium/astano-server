@@ -209,19 +209,31 @@ const quoteCart = async (params: QuoteParams) => {
 	for (const item of cart.items) {
 		const product = item.variant.product
 
+		/**
+		 * How this line is named back to the customer when something is wrong
+		 * with it.
+		 *
+		 * SKU first — it is what is printed on their cart line — then the product
+		 * name for the products that have none. Every message below interpolates
+		 * a bare identifier ("{sku} is no longer available"), never the literal
+		 * word "SKU", so either reads correctly.
+		 */
+		const label =
+			item.variant.sku ?? pick(product.translations, params.locale)?.name ?? "This item"
+
 		// Re-validate at checkout. A cart can sit for weeks while the product is
 		// unpublished, sold out, its MOQ raised, or turned quote-only.
 		if (!item.variant.isActive || product.status !== "PUBLISHED") {
 			throw new ApiError(httpStatus.CONFLICT, "A product in your cart is no longer available", {
 				messageKey: "order.lineUnavailable",
-				messageVars: { sku: item.variant.sku },
+				messageVars: { sku: label },
 			})
 		}
 
 		if (product.quoteEnabled) {
 			throw new ApiError(httpStatus.CONFLICT, "A product in your cart is quote-only", {
 				messageKey: "order.lineQuoteOnly",
-				messageVars: { sku: item.variant.sku },
+				messageVars: { sku: label },
 			})
 		}
 
@@ -229,7 +241,7 @@ const quoteCart = async (params: QuoteParams) => {
 		if (isBelowMoq(item.quantity, moq)) {
 			throw new ApiError(httpStatus.CONFLICT, "A line is below its minimum order quantity", {
 				messageKey: "order.lineBelowMoq",
-				messageVars: { sku: item.variant.sku, moq: String(moq) },
+				messageVars: { sku: label, moq: String(moq) },
 			})
 		}
 
@@ -240,7 +252,7 @@ const quoteCart = async (params: QuoteParams) => {
 		) {
 			throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
 				messageKey: "order.lineOutOfStock",
-				messageVars: { sku: item.variant.sku, available: String(item.variant.stock) },
+				messageVars: { sku: label, available: String(item.variant.stock) },
 			})
 		}
 
@@ -258,7 +270,7 @@ const quoteCart = async (params: QuoteParams) => {
 		if (!unitPrice || !lineTotal) {
 			throw new ApiError(httpStatus.CONFLICT, "A product in your cart has no price", {
 				messageKey: "order.lineNoPrice",
-				messageVars: { sku: item.variant.sku },
+				messageVars: { sku: label },
 			})
 		}
 
@@ -267,7 +279,7 @@ const quoteCart = async (params: QuoteParams) => {
 
 		lines.push({
 			item,
-			name: t?.name ?? item.variant.sku,
+			name: t?.name ?? label,
 			attributes: item.variant.attributeValues.map(
 				(av) => pick(av.attributeValue.translations, params.locale)?.label ?? av.attributeValue.code
 			),
@@ -562,7 +574,11 @@ const place = async (
 					orderId: created.id,
 					variantId: line.item.variantId,
 					productId: line.item.variant.productId,
-					sku: line.item.variant.sku,
+					// Empty, not null: the snapshot column is non-null and a real SKU is
+					// never blank, so "" is unambiguous shorthand for "had none at the
+					// time". The invoice renders it into an empty element, which is what
+					// no SKU should look like.
+					sku: line.item.variant.sku ?? "",
 					name: line.name,
 					attributes: line.attributes,
 					quantity: line.item.quantity,
@@ -580,7 +596,11 @@ const place = async (
 					orderId: created.id,
 					variantId: line.item.variantId,
 					productId: line.item.variant.productId,
-					sku: line.item.variant.sku,
+					// Empty, not null: the snapshot column is non-null and a real SKU is
+					// never blank, so "" is unambiguous shorthand for "had none at the
+					// time". The invoice renders it into an empty element, which is what
+					// no SKU should look like.
+					sku: line.item.variant.sku ?? "",
 					name: line.name,
 					attributes: line.attributes,
 					quantity: line.item.quantity,

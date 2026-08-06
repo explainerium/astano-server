@@ -100,7 +100,11 @@ const create: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.CREATED,
 		message: t("product.created", req.locale),
-		data: await ProductService.create(req.body, req.locale),
+		// `sub`, not `id`. AccessTokenPayload extends jsonwebtoken's JwtPayload,
+		// which carries an index signature, so `req.user.id` typechecks as `any`
+		// and silently arrives as undefined — the author column stayed empty with
+		// nothing anywhere to say why.
+		data: await ProductService.create(req.body, req.locale, req.user?.sub),
 	})
 })
 

@@ -16,6 +16,10 @@ import ApiError from "../../errors/ApiError"
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
 const detailInclude = {
+	// A select, not `true`. The relation is a full user row — password hash,
+	// VAT number, consent timestamps — and this one is serialised straight into
+	// an admin list response. Only the three fields a name is built from.
+	createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
 	translations: true,
 	categories: { include: { category: { include: { translations: true } } } },
 	attributes: true,
@@ -224,12 +228,29 @@ const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRo
 	}
 }
 
+/**
+ * The staff account that created a product, as a name the admin list can print.
+ *
+ * Falls back to the email when the profile has no name — a staff account seeded
+ * from the command line has one but not the other, and a blank cell in an
+ * author column reads as "nobody", which is a different fact from "unnamed".
+ * Null only when the column itself is null: a product created before the column
+ * existed, or by an account since deleted.
+ */
+const toAuthor = (user: ProductDetail["createdBy"]) => {
+	if (!user) return null
+
+	const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim()
+	return { id: user.id, name: name || user.email, email: user.email }
+}
+
 /** Admin shape — everything, including the internal label. */
 const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 	const t = pickTranslation(row.translations, locale)
 
 	return {
 		id: row.id,
+		createdBy: toAuthor(row.createdBy),
 		kind: row.kind,
 		status: row.status,
 		visibility: row.visibility,
@@ -545,12 +566,17 @@ const resolveSlug = async (t: TranslationInput, excludeProductId?: string): Prom
  * neither.
  */
 const assertSkusAvailable = async (
-	variants: { sku: string }[],
+	variants: { sku?: string | null }[],
 	excludeProductId?: string
 ): Promise<void> => {
 	const seen = new Set<string>()
 	for (const v of variants) {
-		const sku = v.sku.trim()
+		// No SKU is not a clash. Any number of variants may have none, which is
+		// why the column is nullable rather than an empty string — "" would
+		// collide with itself in a unique index, NULL does not.
+		const sku = v.sku?.trim()
+		if (!sku) continue
+
 		if (seen.has(sku)) {
 			throw new ApiError(httpStatus.CONFLICT, `Duplicate SKU ${sku} in this product`, {
 				messageKey: "product.duplicateSkuInPayload",
@@ -575,14 +601,19 @@ const assertSkusAvailable = async (
 			clash.product.translations[0]?.name ??
 			"another product"
 
-		throw new ApiError(httpStatus.CONFLICT, `SKU ${clash.sku} is already used`, {
+		// The column is nullable, but this row was found by matching `seen`, which
+		// holds only non-empty SKUs — so it has one. The fallback is unreachable
+		// and exists only to satisfy the type.
+		const sku = clash.sku ?? ""
+
+		throw new ApiError(httpStatus.CONFLICT, `SKU ${sku} is already used`, {
 			messageKey: "product.duplicateSku",
-			messageVars: { sku: clash.sku, product: owner },
+			messageVars: { sku, product: owner },
 		})
 	}
 }
 
-const create = async (payload: any, locale: LocaleCode) => {
+const create = async (payload: any, locale: LocaleCode, createdById?: string) => {
 	const defaults = payload.variants.filter((v: any) => v.isDefault)
 	if (defaults.length > 1) {
 		throw new ApiError(httpStatus.BAD_REQUEST, "Only one variant can be the default", {
@@ -606,6 +637,10 @@ const create = async (payload: any, locale: LocaleCode) => {
 
 	const created = await prisma.product.create({
 		data: {
+			// From the session, never the payload. An author a client can name is
+			// an author a client can forge, and this is the one column here whose
+			// only job is to be trustworthy.
+			createdById: createdById ?? null,
 			kind: payload.kind,
 			status: payload.status,
 			visibility: payload.visibility,

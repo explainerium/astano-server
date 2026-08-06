@@ -1,3 +1,4 @@
+import Decimal from "decimal.js"
 import { z } from "zod"
 import { SUPPORTED_LOCALES } from "../../../config/locales"
 
@@ -27,17 +28,55 @@ const tier = z.object({
 	value: money,
 })
 
-const price = z.object({
-	role: priceRole,
-	basePrice: money,
-	salePrice: money.nullable().optional(),
-	saleStartsAt: z.coerce.date().nullable().optional(),
-	saleEndsAt: z.coerce.date().nullable().optional(),
-})
+/**
+ * A role's price row.
+ *
+ * `salePrice` may not exceed `basePrice`, and the rule belongs here rather than
+ * in the admin UI because nothing downstream questions it. `resolvePrice`
+ * charges the sale price whenever one is set and in window — it never compares
+ * the two — so a sale of 200 against a list of 100 bills the customer *more*
+ * than the product costs, and the storefront strikes through the 100 to
+ * advertise it as the discount. Every caller inherits the mistake: cart, order,
+ * quote and bundle all price from the same resolver.
+ *
+ * Equal is allowed. A sale that matches the list price is pointless but not
+ * wrong, and it is a normal intermediate state while an admin is editing.
+ */
+const price = z
+	.object({
+		role: priceRole,
+		basePrice: money,
+		salePrice: money.nullable().optional(),
+		saleStartsAt: z.coerce.date().nullable().optional(),
+		saleEndsAt: z.coerce.date().nullable().optional(),
+	})
+	.refine(
+		(row) =>
+			row.salePrice === null ||
+			row.salePrice === undefined ||
+			new Decimal(row.salePrice).lessThanOrEqualTo(new Decimal(row.basePrice)),
+		{
+			path: ["salePrice"],
+			message: "The sale price cannot be higher than the regular price.",
+		}
+	)
 
 const variant = z.object({
 	id: z.string().uuid().optional(),
-	sku: z.string().trim().min(1).max(100),
+	/**
+	 * Optional, and blank stays blank.
+	 *
+	 * Normalised to null rather than "" because the column is unique: two
+	 * products without a SKU would collide on the empty string, while any number
+	 * of NULLs coexist.
+	 */
+	sku: z
+		.string()
+		.trim()
+		.max(100)
+		.nullable()
+		.optional()
+		.transform((value) => value || null),
 	isDefault: z.boolean().default(false),
 	isActive: z.boolean().default(true),
 	sortOrder: z.number().int().default(0),
@@ -71,7 +110,14 @@ const variant = z.object({
  */
 const variantPatch = z.object({
 	id: z.string().uuid().optional(),
-	sku: z.string().trim().min(1).max(100),
+	/** Same as `variant.sku` — optional, and blank normalised to null. */
+	sku: z
+		.string()
+		.trim()
+		.max(100)
+		.nullable()
+		.optional()
+		.transform((value) => value || null),
 	isDefault: z.boolean().optional(),
 	isActive: z.boolean().optional(),
 	sortOrder: z.number().int().optional(),

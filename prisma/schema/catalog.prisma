@@ -150,12 +150,30 @@ model Product {
   /// Products that offer THIS product as an option.
   offeredBy ProductOption[] @relation("OptionProduct")
 
+  /// Which staff account created this product.
+  ///
+  /// Nullable and `SetNull` on delete, both deliberately. Nullable because
+  /// every product that already exists predates this column and there is no
+  /// honest value to backfill — "unknown" is the truth. `SetNull` rather than
+  /// `Cascade` because deleting a member of staff must not delete the catalogue
+  /// they built.
+  ///
+  /// Set once, on create, and never on update: this answers "who added this",
+  /// not "who touched it last". A last-edited-by column is a different feature
+  /// and would need its own history to be worth anything.
+  createdById String?
+  createdBy   User?   @relation("ProductAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status, kind])
   @@index([visibility, status])
   @@index([quoteEnabled])
+  // Not for querying — nothing lists products by author. It is what stops
+  // deleting a staff account from sequentially scanning the whole catalogue to
+  // apply the SetNull.
+  @@index([createdById])
   @@map("products")
 }
 
@@ -200,7 +218,18 @@ model ProductVariant {
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  sku       String  @unique
+  /// Nullable, and unique only among the variants that have one.
+  ///
+  /// A SKU is the client's own identifier for a product, not something this
+  /// system is entitled to invent. The editor used to generate one from the
+  /// product name whenever the field was left blank, which kept the column
+  /// non-null at the cost of filling the catalogue with codes nobody chose and
+  /// every stock report then had to carry. Blank now stays blank.
+  ///
+  /// Postgres treats NULLs as distinct in a unique index, so any number of
+  /// variants may have none while the ones that do are still guaranteed unique.
+  /// Empty string would not work here — "" collides with "".
+  sku       String? @unique
   isDefault Boolean @default(false)
   sortOrder Int     @default(0)
 
