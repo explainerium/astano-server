@@ -8,6 +8,7 @@ import {
 } from "../../../domain/pricing/resolvePrice"
 import { getEffectiveMoq } from "../../../domain/moq/getEffectiveMoq"
 import { storage } from "../../../helpers/storage"
+import { copyNameFor } from "../../../shared/duplicate"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { slugify, uniqueSlug } from "../../../shared/slugify"
@@ -531,6 +532,41 @@ const expandAttributes = (input?: AttributeInput[]) =>
 		}))
 	)
 
+/**
+ * A stored price row reduced to the fields a *new* one is created from.
+ *
+ * The rows loaded by `detailInclude` carry `id`, `productId`/`variantId` and
+ * timestamps. Handed to `create`, which passes its `prices` array straight into
+ * a nested Prisma `create`, those keys are rejected — and the copy would be
+ * claiming the original's row id if they were not.
+ */
+const stripPriceRow = (row: {
+	role: string
+	basePrice: unknown
+	salePrice: unknown
+	saleStartsAt: Date | null
+	saleEndsAt: Date | null
+}) => ({
+	role: row.role as "GUEST" | "B2C" | "RESELLER",
+	basePrice: String(row.basePrice),
+	salePrice: row.salePrice === null ? null : String(row.salePrice),
+	saleStartsAt: row.saleStartsAt,
+	saleEndsAt: row.saleEndsAt,
+})
+
+/** The same, for a rung of a quantity ladder. */
+const stripTierRow = (row: {
+	role: string
+	minQuantity: number
+	type: string
+	value: unknown
+}) => ({
+	role: row.role as "GUEST" | "B2C" | "RESELLER",
+	minQuantity: row.minQuantity,
+	type: row.type as "FIXED_PRICE" | "PERCENTAGE" | "FIXED_AMOUNT",
+	value: String(row.value),
+})
+
 interface TranslationInput {
 	locale: string
 	name: string
@@ -704,6 +740,122 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 	})
 
 	return toAdminProduct(created, locale)
+}
+
+/**
+ * Copies a product, everything about it, as a draft.
+ *
+ * Built by reading the original and handing it back to `create` rather than
+ * writing a second insert path. Slug resolution, SKU checking, the
+ * one-default-variant rule and every default already live there; a parallel
+ * copy routine would drift from them the first time any of it changed.
+ *
+ * Four things are deliberately not carried over:
+ *
+ * - **Status.** A duplicate is by definition identical to something already in
+ *   the catalogue, so publishing it on creation puts two indistinguishable
+ *   listings in the shop before anyone has edited one of them. It lands as a
+ *   draft, which is also what WooCommerce's own Duplicate does. Newly *created*
+ *   products still publish by default — that is a different act.
+ * - **SKU.** It is unique, and it identifies one product. The copy gets none
+ *   rather than an invented variation on the original's.
+ * - **Slugs.** Re-derived from the new name, so the copy cannot take a URL that
+ *   belongs to the live product.
+ * - **The author.** Set to whoever pressed Duplicate. They are the one adding
+ *   this row to the catalogue.
+ *
+ * Everything else is the point of the feature and is copied verbatim: prices,
+ * tier ladders, categories, attributes, images, options, MOQ, tax status,
+ * dimensions. Assets and option products are copied as *references* — they are
+ * shared library rows, not per-product files, so the copy points at the same
+ * ones rather than duplicating the media library alongside it.
+ */
+const duplicate = async (id: string, locale: LocaleCode, createdById?: string) => {
+	const row = await prisma.product.findUnique({ where: { id }, include: detailInclude })
+	if (!row) {
+		throw new ApiError(httpStatus.NOT_FOUND, "Product not found", {
+			messageKey: "product.notFound",
+		})
+	}
+
+	return create(
+		{
+			kind: row.kind,
+			status: "DRAFT",
+			visibility: row.visibility,
+			quoteEnabled: row.quoteEnabled,
+			taxStatus: row.taxStatus,
+			moq: row.moq,
+			sortOrder: row.sortOrder,
+			featuredAssetId: row.featuredAssetId,
+			categoryIds: row.categories.map((c) => c.categoryId),
+			assetIds: row.assets.map((a) => a.assetId),
+
+			// Slug omitted on purpose: `resolveSlug` derives a fresh one from the
+			// copied name, so the duplicate can never claim the original's URL.
+			translations: row.translations.map((t) => ({
+				locale: t.locale,
+				name: copyNameFor(t.name, t.locale),
+				shortDescription: t.shortDescription ?? undefined,
+				description: t.description ?? undefined,
+				metaTitle: t.metaTitle ?? undefined,
+				metaDescription: t.metaDescription ?? undefined,
+			})),
+
+			// Regrouped to one entry per attribute, the shape `expandAttributes`
+			// expects — the table stores one row per selected value.
+			attributes: [
+				...row.attributes
+					.reduce((map, a) => {
+						const entry = map.get(a.attributeId) ?? {
+							attributeId: a.attributeId,
+							attributeValueIds: [] as string[],
+							isVisible: a.isVisible,
+							isVariation: a.isVariation,
+						}
+						entry.attributeValueIds.push(a.attributeValueId)
+						return map.set(a.attributeId, entry)
+					}, new Map<string, AttributeInput>())
+					.values(),
+			],
+
+			prices: row.prices.map(stripPriceRow),
+			tiers: row.priceTiers.map(stripTierRow),
+
+			options: row.options.map((o) => ({
+				optionProductId: o.optionProductId,
+				sortOrder: o.sortOrder,
+				groupLabel: o.groupLabel,
+				preselected: o.preselected,
+				discountPercent: o.discountPercent,
+			})),
+
+			variants: row.variants.map((v) => ({
+				// No id — these are new rows, not an update of the originals.
+				sku: null,
+				isDefault: v.isDefault,
+				isActive: v.isActive,
+				sortOrder: v.sortOrder,
+				moq: v.moq,
+				manageStock: v.manageStock,
+				// Stock is not inventory the copy owns. Starting a draft at the
+				// original's count would claim goods that do not exist.
+				stock: 0,
+				allowBackorder: v.allowBackorder,
+				lowStockThreshold: v.lowStockThreshold,
+				weightKg: v.weightKg,
+				lengthCm: v.lengthCm,
+				widthCm: v.widthCm,
+				heightCm: v.heightCm,
+				imageAssetId: v.imageAssetId,
+				attributeValueIds: v.attributeValues.map((a) => a.attributeValueId),
+				prices: v.prices.map(stripPriceRow),
+				tiers: v.priceTiers.map(stripTierRow),
+			})),
+		},
+		locale,
+		createdById
+	)
 }
 
 const update = async (id: string, payload: any, locale: LocaleCode) => {
@@ -921,6 +1073,7 @@ export const ProductService = {
 	adminList,
 	adminGetById,
 	create,
+	duplicate,
 	update,
 	remove,
 	pricingRoleFor: (role?: string, status?: string): PricingRole =>

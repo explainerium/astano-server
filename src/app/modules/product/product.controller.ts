@@ -108,6 +108,16 @@ const create: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+const duplicate: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.CREATED,
+		message: t("product.duplicated", req.locale),
+		// The author of the copy is whoever pressed Duplicate, not whoever
+		// created the original.
+		data: await ProductService.duplicate(req.params.id as string, req.locale, req.user?.sub),
+	})
+})
+
 const update: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
@@ -131,6 +141,7 @@ export const ProductController = {
 	adminList,
 	adminGetById,
 	create,
+	duplicate,
 	update,
 	remove,
 }

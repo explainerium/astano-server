@@ -1,7 +1,9 @@
 import type { Prisma } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
+import { copyCode, copyNameFor } from "../../../shared/duplicate"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
+import { uniqueSlug } from "../../../shared/slugify"
 import ApiError from "../../errors/ApiError"
 
 const include = {
@@ -143,6 +145,58 @@ const update = async (
 	return getById(id, locale)
 }
 
+/**
+ * Copies an attribute **with all of its values**.
+ *
+ * The values are the whole point. An attribute is a heading — "Diameter",
+ * "Material" — and its twenty values are what took the time to enter; a copy
+ * without them would leave the one part worth duplicating still to do.
+ *
+ * Value codes are reused verbatim, which is safe because their uniqueness is
+ * scoped per attribute (`@@unique([attributeId, code])`). The attribute's own
+ * code is global, so it gains a `-copy` suffix, numbered if that is taken too.
+ *
+ * What is not copied is which products and variants use the attribute. Those
+ * are assignments made on the product, and a duplicate that arrived already
+ * attached to half the catalogue would be a second attribute silently competing
+ * with the first.
+ */
+const duplicate = async (id: string, locale: LocaleCode) => {
+	const row = await prisma.attribute.findUnique({ where: { id }, include })
+	if (!row) {
+		throw new ApiError(httpStatus.NOT_FOUND, "Attribute not found", {
+			messageKey: "attribute.notFound",
+		})
+	}
+
+	const code = await uniqueSlug(copyCode(row.code), async (candidate) => {
+		const clash = await prisma.attribute.findUnique({
+			where: { code: candidate },
+			select: { id: true },
+		})
+		return clash !== null
+	})
+
+	return create(
+		{
+			code,
+			sortOrder: row.sortOrder,
+			translations: row.translations.map((t) => ({
+				locale: t.locale,
+				name: copyNameFor(t.name, t.locale),
+			})),
+			values: row.values.map((v) => ({
+				code: v.code,
+				sortOrder: v.sortOrder,
+				// Labels are copied as they are. They belong to the value, not the
+				// attribute, and "Ø 60 mm (copy)" would be nonsense on every one.
+				translations: v.translations.map((t) => ({ locale: t.locale, label: t.label })),
+			})),
+		},
+		locale
+	)
+}
+
 const remove = async (id: string): Promise<void> => {
 	const row = await prisma.attribute.findUnique({
 		where: { id },
@@ -242,6 +296,7 @@ export const AttributeService = {
 	list,
 	getById,
 	create,
+	duplicate,
 	update,
 	remove,
 	removeValue,

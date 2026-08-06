@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import type { LocaleCode } from "../../../config/locales"
 import { DEFAULT_LOCALE } from "../../../config/locales"
+import { copyNameFor } from "../../../shared/duplicate"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { slugify, uniqueSlug } from "../../../shared/slugify"
@@ -283,6 +284,60 @@ const update = async (
 	return getById(id, locale)
 }
 
+/**
+ * Copies a category's settings, not its contents.
+ *
+ * Built on `create` so slug resolution is the one that already exists. What
+ * carries over is everything that makes the next category tedious to set up by
+ * hand: parent, sort order, hidden flag, option-category flag, image, and the
+ * descriptions and meta text in both languages.
+ *
+ * Two things deliberately do not:
+ *
+ * - **Products.** Copying the assignments would put every product in two
+ *   categories at once, which is almost never what "duplicate this category"
+ *   means and is tedious to undo one product at a time. The copy starts empty.
+ * - **Subcategories.** Duplicating a branch would silently create a whole tree
+ *   from one click, and the size of it would not be visible beforehand.
+ *
+ * The copy keeps the original's `isHidden`. Left alone that means a duplicate
+ * of a visible category is immediately visible — but a category with nothing in
+ * it shows an empty listing, not a wrong one, and quietly hiding a copy of a
+ * visible category would be its own surprise.
+ */
+const duplicate = async (id: string, locale: LocaleCode): Promise<CategoryView> => {
+	const row = await prisma.category.findUnique({
+		where: { id },
+		include: { translations: true },
+	})
+
+	if (!row) {
+		throw new ApiError(httpStatus.NOT_FOUND, "Category not found", {
+			messageKey: "category.notFound",
+		})
+	}
+
+	return create(
+		{
+			parentId: row.parentId,
+			sortOrder: row.sortOrder,
+			isHidden: row.isHidden,
+			isOptionCategory: row.isOptionCategory,
+			imageAssetId: row.imageAssetId,
+			// Slug omitted: `resolveSlug` derives a fresh one from the copied name,
+			// so the duplicate cannot claim the original's URL.
+			translations: row.translations.map((t) => ({
+				locale: t.locale,
+				name: copyNameFor(t.name, t.locale),
+				description: t.description ?? undefined,
+				metaTitle: t.metaTitle ?? undefined,
+				metaDescription: t.metaDescription ?? undefined,
+			})),
+		},
+		locale
+	)
+}
+
 const remove = async (id: string): Promise<void> => {
 	const row = await prisma.category.findUnique({
 		where: { id },
@@ -369,6 +424,7 @@ export const CategoryService = {
 	getBySlug,
 	getById,
 	create,
+	duplicate,
 	update,
 	remove,
 	adminList,

@@ -26,6 +26,15 @@ router.post(
 	AttributeController.create
 )
 
+// POST, not PATCH: it creates a new attribute, values and all. No body —
+// everything the copy needs is already on the original.
+router.post(
+	"/:id/duplicate",
+	auth("ADMIN", "SHOP_MANAGER"),
+	validateRequest(AttributeValidation.attributeIdSchema),
+	AttributeController.duplicate
+)
+
 router.patch(
 	"/:id",
 	auth("ADMIN", "SHOP_MANAGER"),

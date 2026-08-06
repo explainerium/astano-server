@@ -40,6 +40,14 @@ const create: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+const duplicate: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.CREATED,
+		message: t("category.duplicated", req.locale),
+		data: await CategoryService.duplicate(req.params.id as string, req.locale),
+	})
+})
+
 const update: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
@@ -78,6 +86,7 @@ export const CategoryController = {
 	list,
 	getBySlug,
 	create,
+	duplicate,
 	update,
 	remove,
 	adminList,

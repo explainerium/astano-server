@@ -30,6 +30,14 @@ const create: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+const duplicate: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.CREATED,
+		message: t("attribute.duplicated", req.locale),
+		data: await AttributeService.duplicate(req.params.id as string, req.locale),
+	})
+})
+
 const update: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
@@ -69,6 +77,7 @@ export const AttributeController = {
 	list,
 	getById,
 	create,
+	duplicate,
 	update,
 	remove,
 	removeValue,

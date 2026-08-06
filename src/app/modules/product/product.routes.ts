@@ -40,6 +40,14 @@ AdminProductRoutes.post(
 	ProductController.create
 )
 
+// POST, not PATCH: it creates a new product. The body is empty — everything the
+// copy needs is already on the original.
+AdminProductRoutes.post(
+	"/:id/duplicate",
+	validateRequest(ProductValidation.productIdSchema),
+	ProductController.duplicate
+)
+
 AdminProductRoutes.patch(
 	"/:id",
 	validateRequest(ProductValidation.updateProductSchema),

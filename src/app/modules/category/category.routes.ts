@@ -26,6 +26,15 @@ router.post(
 	CategoryController.create
 )
 
+// POST, not PATCH: it creates a new category. No body — everything the copy
+// needs is already on the original.
+router.post(
+	"/:id/duplicate",
+	auth("ADMIN", "SHOP_MANAGER"),
+	validateRequest(CategoryValidation.categoryIdSchema),
+	CategoryController.duplicate
+)
+
 router.patch(
 	"/:id",
 	auth("ADMIN", "SHOP_MANAGER"),
