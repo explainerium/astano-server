@@ -123,3 +123,71 @@ model VariantPriceTier {
   @@index([variantId, role])
   @@map("variant_price_tiers")
 }
+
+/// A quantity ladder attached to a category rather than a product.
+///
+/// One blanket rule instead of the same ladder typed onto forty products: every
+/// product filed under the category inherits it. Carries no price of its own —
+/// only rungs — so a percentage rung means "off whatever this customer would
+/// otherwise pay for this product", and the product still needs its own price.
+///
+/// The quantity these rungs are measured against is **the whole category's
+/// total in the cart**, not one line. Buying ten each of five different cutters
+/// from one category reaches a threshold of 50 that no single line reaches.
+/// That is what makes a category ladder worth having and not simply a
+/// convenience for bulk-editing product ladders.
+model CategoryPriceTier {
+  id         String   @id @default(uuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  role        PriceRole
+  minQuantity Int
+
+  type  TierType @default(FIXED_PRICE)
+  value Decimal  @db.Decimal(12, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([categoryId, role, minQuantity])
+  @@index([categoryId, role])
+  @@map("category_price_tiers")
+}
+
+/// A quantity ladder negotiated with one customer.
+///
+/// The most specific pricing rule there is, and the one that outranks the rest
+/// by default: a ladder agreed with a named dealer should not be undercut — or
+/// overridden — by a category-wide discount someone added later.
+///
+/// No role column. A customer has exactly one role, so the role is already
+/// decided by whose ladder this is; storing it again would only create a way
+/// for the two to disagree.
+///
+/// `productId` null means the ladder covers everything that customer buys.
+/// Otherwise it is scoped to one product, which is how "we agreed a price with
+/// them on this item" is expressed.
+model CustomerPriceTier {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  minQuantity Int
+
+  type  TierType @default(FIXED_PRICE)
+  value Decimal  @db.Decimal(12, 4)
+
+  /// Free-text note for staff — why this ladder exists, who agreed it.
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, productId, minQuantity])
+  @@index([userId, productId])
+  @@map("customer_price_tiers")
+}

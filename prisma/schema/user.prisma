@@ -93,6 +93,9 @@ model User {
   /// Products this staff account created. See Product.createdBy.
   productsCreated Product[] @relation("ProductAuthor")
 
+  /// Quantity ladders negotiated with this customer.
+  priceTiers CustomerPriceTier[]
+
   @@index([role, status])
   @@map("users")
 }

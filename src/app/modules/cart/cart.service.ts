@@ -11,6 +11,7 @@ import { generateToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
 import { GUEST_CART_TTL_DAYS } from "./cart.constant"
 import { applyBundleDiscount, loadBundleDiscounts } from "./bundleDiscount"
+import { loadExternalTiers, type ExternalTiers } from "../product/tierSources"
 
 const cartInclude = {
 	items: {
@@ -72,7 +73,14 @@ const toPriceInputs = (
 const priceLine = (
 	item: ItemRow,
 	role: PricingRole,
-	bundleDiscounts?: Map<string, Decimal>
+	bundleDiscounts?: Map<string, Decimal>,
+	/**
+	 * Ladders that live outside the product — the customer's own, and the
+	 * categories'. Loaded once for the whole cart and handed in, because a
+	 * category ladder is measured against every line at once and cannot be
+	 * answered from a single line.
+	 */
+	externalTiers?: (productId: string) => ExternalTiers
 ) => {
 	const product = item.variant.product
 
@@ -82,6 +90,7 @@ const priceLine = (
 		quantity: item.quantity,
 		productPrices: toPriceInputs(product.prices, product.priceTiers),
 		variantPrices: toPriceInputs(item.variant.prices, item.variant.priceTiers),
+		...(externalTiers?.(product.id) ?? {}),
 	})
 
 	const discount = bundleDiscounts?.get(item.id)
@@ -100,7 +109,8 @@ const view = (
 	cart: CartRow,
 	locale: LocaleCode,
 	role: PricingRole,
-	bundleDiscounts?: Map<string, Decimal>
+	bundleDiscounts?: Map<string, Decimal>,
+	externalTiers?: (productId: string) => ExternalTiers
 ) => {
 	const lines = cart.items
 		// Option lines are nested under their parent rather than listed flat.
@@ -109,7 +119,7 @@ const view = (
 			const build = (i: ItemRow) => {
 				const product = i.variant.product
 				const t = pick(product.translations, locale)
-				const price = priceLine(i, role, bundleDiscounts)
+				const price = priceLine(i, role, bundleDiscounts, externalTiers)
 				const moq = getEffectiveMoq({ productMoq: product.moq, variantMoq: i.variant.moq })
 				const image = i.variant.image ?? product.featuredAsset
 
@@ -146,7 +156,7 @@ const view = (
 	// Sum every line including nested options. Each line total is already
 	// rounded to 2dp, matching the old store's line-level rounding (§3.1).
 	const subtotal = cart.items.reduce((sum, i) => {
-		const total = priceLine(i, role, bundleDiscounts).lineTotal
+		const total = priceLine(i, role, bundleDiscounts, externalTiers).lineTotal
 		return total ? sum.plus(total) : sum
 	}, new Decimal(0))
 
@@ -278,7 +288,26 @@ const roleOf = (owner: CartOwner): PricingRole =>
 
 const get = async (owner: CartOwner, locale: LocaleCode) => {
 	const { cart, token } = await resolveCart(owner)
-	return { cart: view(cart, locale, roleOf(owner), await loadBundleDiscounts(cart.items)), token }
+	/**
+	 * Loaded once per read, for the whole cart.
+	 *
+	 * A category ladder is measured against every line at once, so it cannot be
+	 * resolved line by line — and loading per line would turn a twenty-line cart
+	 * into forty queries.
+	 */
+	const role = roleOf(owner)
+	const externalTiers = await loadExternalTiers({
+		productIds: [...new Set(cart.items.map((i) => i.variant.productId))],
+		role,
+		userId: owner.userId,
+		cartId: cart.id,
+		withCategoryQuantities: true,
+	})
+
+	return {
+		cart: view(cart, locale, role, await loadBundleDiscounts(cart.items), externalTiers),
+		token,
+	}
 }
 
 const addItem = async (

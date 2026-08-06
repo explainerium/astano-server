@@ -35,6 +35,32 @@ export interface RolePriceInput {
 	tiers?: TierInput[]
 }
 
+/**
+ * Where a quantity ladder came from.
+ *
+ * `catalogue` covers both the product's own ladder and a variant's — which of
+ * those two applies is already decided by the price row, and a variant ladder
+ * is not a separate *kind* of rule, only a more specific place to put one.
+ *
+ * The other two are genuinely different rules that happen to share the rung
+ * shape: one attached to a customer, one attached to a category.
+ */
+export type TierSource = "customer" | "catalogue" | "category"
+
+/**
+ * Which ladder wins when more than one has a rung the quantity reaches.
+ *
+ * The most specific first. A ladder negotiated with one customer should not be
+ * overridden by a blanket category discount, and a price set on the product
+ * itself is a deliberate act that outranks a rule covering everything in a
+ * category.
+ *
+ * Sources fall *through*, they are not exclusive: a higher-priority source with
+ * no matching rung leaves the next one to answer. Only the first source that
+ * actually produces a rung is used.
+ */
+export const DEFAULT_TIER_PRIORITY: TierSource[] = ["customer", "catalogue", "category"]
+
 export interface ResolvePriceInput {
 	/// "Preis auf Anfrage" — no price is shown and nothing can be bought (R2).
 	quoteEnabled?: boolean
@@ -44,6 +70,32 @@ export interface ResolvePriceInput {
 	productPrices: RolePriceInput[]
 	/// Variant overrides. When a row exists for the resolved role it wins.
 	variantPrices?: RolePriceInput[]
+
+	/**
+	 * A ladder negotiated with this one customer, for this product.
+	 *
+	 * Already filtered to the customer and to products this ladder covers — the
+	 * resolver does not know who the customer is, only that a ladder was handed
+	 * to it.
+	 */
+	customerTiers?: TierInput[]
+
+	/// Ladders from the categories this product is filed under.
+	categoryTiers?: TierInput[]
+
+	/**
+	 * The quantity a category ladder is measured against.
+	 *
+	 * Deliberately separate from `quantity`. A category ladder rewards a customer
+	 * for buying across the category — five different cutters, ten of each, reach
+	 * a threshold of 50 that no single line reaches. Falls back to the line
+	 * quantity when the caller has no cart to count.
+	 */
+	categoryQuantity?: number
+
+	/// Overrides `DEFAULT_TIER_PRIORITY`, e.g. from a store setting.
+	tierPriority?: TierSource[]
+
 	now?: Date
 }
 
@@ -59,6 +111,8 @@ export interface ResolvedPrice {
 	lineTotal: Decimal | null
 	/// The tier that applied, if any.
 	appliedTier: TierInput | null
+	/// Which ladder the applied tier came from. Null when no tier applied.
+	tierSource: TierSource | null
 	/// Which role's row was actually used — may differ from the requested role
 	/// when that role has no price defined.
 	resolvedRole: PricingRole | null
@@ -127,6 +181,45 @@ const applyTier = (base: Decimal, tier: TierInput): Decimal => {
 	}
 }
 
+/**
+ * Walks the priority order and returns the first source that has a rung the
+ * quantity reaches.
+ *
+ * Falls through rather than stopping: a customer ladder that only starts at
+ * 1000 leaves the catalogue ladder to answer an order of 200. Only a source
+ * that actually produces a rung ends the walk.
+ */
+const pickTierBySource = (
+	input: ResolvePriceInput,
+	catalogueTiers: TierInput[] | undefined,
+	quantity: number
+): { tier: TierInput; tierSource: TierSource } | null => {
+	const order = input.tierPriority?.length ? input.tierPriority : DEFAULT_TIER_PRIORITY
+
+	for (const candidate of order) {
+		switch (candidate) {
+			case "customer": {
+				const tier = pickTier(input.customerTiers, quantity)
+				if (tier) return { tier, tierSource: "customer" }
+				break
+			}
+			case "catalogue": {
+				const tier = pickTier(catalogueTiers, quantity)
+				if (tier) return { tier, tierSource: "catalogue" }
+				break
+			}
+			case "category": {
+				// Measured against the whole category's cart total, not this line.
+				const tier = pickTier(input.categoryTiers, input.categoryQuantity ?? quantity)
+				if (tier) return { tier, tierSource: "category" }
+				break
+			}
+		}
+	}
+
+	return null
+}
+
 export const resolvePrice = (input: ResolvePriceInput): ResolvedPrice => {
 	const empty: ResolvedPrice = {
 		quoteOnly: false,
@@ -134,6 +227,7 @@ export const resolvePrice = (input: ResolvePriceInput): ResolvedPrice => {
 		listPrice: null,
 		lineTotal: null,
 		appliedTier: null,
+		tierSource: null,
 		resolvedRole: null,
 		source: null,
 		onSale: false,
@@ -161,8 +255,16 @@ export const resolvePrice = (input: ResolvePriceInput): ResolvedPrice => {
 	const onSale = saleActive(row, now)
 	const base = onSale ? new Decimal(row.salePrice as Numeric) : listPrice
 
-	const tier = pickTier(row.tiers, quantity)
-	let unitPrice = tier ? applyTier(base, tier) : base
+	/**
+	 * Every ladder discounts from the same base — the role's own price.
+	 *
+	 * A category or customer ladder does not carry a price of its own, only
+	 * rungs, so a percentage rung means "off what this customer would otherwise
+	 * pay for this product". Rungs never compound with one another either: only
+	 * one applies, and it applies to the base.
+	 */
+	const applied = pickTierBySource(input, row.tiers, quantity)
+	let unitPrice = applied ? applyTier(base, applied.tier) : base
 
 	// A percentage over 100 or an oversized fixed amount must not produce a
 	// negative price and pay the customer to order.
@@ -173,7 +275,8 @@ export const resolvePrice = (input: ResolvePriceInput): ResolvedPrice => {
 		unitPrice,
 		listPrice,
 		lineTotal: unitPrice.mul(quantity).toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
-		appliedTier: tier,
+		appliedTier: applied?.tier ?? null,
+		tierSource: applied?.tierSource ?? null,
 		resolvedRole: role,
 		source,
 		onSale,
@@ -192,12 +295,23 @@ export const resolvePriceRange = (
 	const picked = pickRow(input.variantPrices, input.role) ?? pickRow(input.productPrices, input.role)
 	if (!picked) return { min: null, max: null, quoteOnly: false }
 
-	const highestRung = (picked.row.tiers ?? []).reduce(
-		(max, t) => Math.max(max, t.minQuantity),
-		1
-	)
+	/**
+	 * The top of the range is the deepest rung *any* eligible ladder reaches.
+	 *
+	 * Taking only the product's own would advertise "from €1.24" while a customer
+	 * ladder actually reaches €0.90 — a range that understates the saving is as
+	 * wrong as one that overstates it.
+	 */
+	const highestRung = [
+		...(picked.row.tiers ?? []),
+		...(input.customerTiers ?? []),
+		...(input.categoryTiers ?? []),
+	].reduce((max, t) => Math.max(max, t.minQuantity), 1)
 
-	const at = (quantity: number) => resolvePrice({ ...input, quantity }).unitPrice
+	// `categoryQuantity` follows the probe quantity here: an archive has no cart
+	// to count, so the range shows what one line of that size would cost.
+	const at = (quantity: number) =>
+		resolvePrice({ ...input, quantity, categoryQuantity: quantity }).unitPrice
 
 	const one = at(1)
 	const top = at(highestRung)

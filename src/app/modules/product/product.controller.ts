@@ -25,6 +25,8 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 	const result = await ProductService.list({
 		locale: req.locale,
 		role: roleFor(req),
+		// Optional: a guest simply has no negotiated ladder to look up.
+		userId: req.user?.sub,
 		category: q.category,
 		search: q.search,
 		quantity: Number(q.quantity ?? 1),
@@ -51,7 +53,8 @@ const getBySlug: RequestHandler = catchAsync(async (req, res) => {
 			req.params.slug as string,
 			req.locale,
 			roleFor(req),
-			Number.isFinite(quantity) && quantity > 0 ? quantity : 1
+			Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+			req.user?.sub
 		),
 	})
 })

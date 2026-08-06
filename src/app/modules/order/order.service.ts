@@ -11,6 +11,7 @@ import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
 import { applyBundleDiscount, loadBundleDiscounts } from "../cart/bundleDiscount"
+import { loadExternalTiers } from "../product/tierSources"
 import { notifyStaff, sendOrderConfirmation, sendOrderStatusChanged } from "../../../helpers/mailer"
 import { t } from "../../../i18n"
 
@@ -194,6 +195,20 @@ const quoteCart = async (params: QuoteParams) => {
 	// one total and the invoice another.
 	const bundleDiscounts = await loadBundleDiscounts(cart.items)
 
+	/**
+	 * And the same ladders. Checkout re-prices from scratch rather than trusting
+	 * the cart's numbers, so it has to load every source the cart loaded — a
+	 * category or customer ladder honoured in the basket and forgotten at
+	 * checkout is the disagreement risk #1 exists to prevent.
+	 */
+	const externalTiers = await loadExternalTiers({
+		productIds: [...new Set(cart.items.map((i) => i.variant.productId))],
+		role,
+		userId: params.userId,
+		cartId: cart.id,
+		withCategoryQuantities: true,
+	})
+
 	const lines: {
 		item: (typeof cart.items)[number]
 		name: string
@@ -261,6 +276,7 @@ const quoteCart = async (params: QuoteParams) => {
 			quantity: item.quantity,
 			productPrices: toPriceInputs(product.prices, product.priceTiers),
 			variantPrices: toPriceInputs(item.variant.prices, item.variant.priceTiers),
+			...externalTiers(product.id),
 		})
 
 		const discount = bundleDiscounts.get(item.id)

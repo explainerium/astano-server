@@ -76,6 +76,9 @@ model Category {
   translations CategoryTranslation[]
   products     ProductCategory[]
 
+  /// Quantity ladders inherited by every product in this category.
+  priceTiers CategoryPriceTier[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -149,6 +152,9 @@ model Product {
 
   /// Products that offer THIS product as an option.
   offeredBy ProductOption[] @relation("OptionProduct")
+
+  /// Per-customer ladders scoped to this product.
+  customerPriceTiers CustomerPriceTier[]
 
   /// Which staff account created this product.
   ///

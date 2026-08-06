@@ -9,6 +9,7 @@ import {
 import { getEffectiveMoq } from "../../../domain/moq/getEffectiveMoq"
 import { storage } from "../../../helpers/storage"
 import { copyNameFor } from "../../../shared/duplicate"
+import { loadExternalTiers, type ExternalTiers } from "./tierSources"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { slugify, uniqueSlug } from "../../../shared/slugify"
@@ -104,13 +105,25 @@ const toPriceInputs = (
  * `kind` is deliberately absent: it is an admin-only dashboard label and must
  * never reach the frontend.
  */
-const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRole, quantity: number) => {
+const toPublicProduct = (
+	row: ProductDetail,
+	locale: LocaleCode,
+	role: PricingRole,
+	quantity: number,
+	/**
+	 * Ladders from outside the product. The shop pages have no cart to count, so
+	 * a category ladder here is measured against the quantity being previewed —
+	 * the cart is where it meets the real total.
+	 */
+	external: ExternalTiers = {}
+) => {
 	const t = pickTranslation(row.translations, locale)
 	const productPrices = toPriceInputs(row.prices, row.priceTiers)
 
 	const defaultVariant = row.variants.find((v) => v.isDefault) ?? row.variants[0]
 
 	const range = resolvePriceRange({
+		...external,
 		quoteEnabled: row.quoteEnabled,
 		role,
 		productPrices,
@@ -147,13 +160,50 @@ const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRo
 		variants: row.variants
 			.filter((v) => v.isActive)
 			.map((v) => {
+				const variantPrices = toPriceInputs(v.prices, v.priceTiers)
+
 				const price = resolvePrice({
+					...external,
 					quoteEnabled: row.quoteEnabled,
 					role,
 					quantity,
 					productPrices,
-					variantPrices: toPriceInputs(v.prices, v.priceTiers),
+					variantPrices,
 				})
+
+				/**
+				 * Every quantity at which this customer's price changes, from
+				 * whichever ladder provides it.
+				 *
+				 * Built from the thresholds rather than from one ladder's rows: with
+				 * three possible sources, a table showing only the product's own
+				 * rungs would omit the row where a category discount actually kicks
+				 * in. Each threshold is then priced through the resolver, so the
+				 * table cannot disagree with the cart about what any of them costs.
+				 */
+				const thresholds = [
+					...(variantPrices.find((p) => p.role === price.resolvedRole)?.tiers ?? []),
+					...(productPrices.find((p) => p.role === price.resolvedRole)?.tiers ?? []),
+					...(external.customerTiers ?? []),
+					...(external.categoryTiers ?? []),
+				].map((tr) => tr.minQuantity)
+
+				const tierRows = [...new Set(thresholds)]
+					.sort((a, b) => a - b)
+					.map((minQuantity) => ({
+						minQuantity,
+						unitPrice:
+							resolvePrice({
+								...external,
+								role,
+								quantity: minQuantity,
+								// An archive has no cart, so a category rung is previewed
+								// against the quantity being asked about.
+								categoryQuantity: minQuantity,
+								productPrices,
+								variantPrices,
+							}).unitPrice?.toFixed(2) ?? null,
+					}))
 
 				const vt = pickTranslation(v.translations, locale)
 
@@ -176,27 +226,7 @@ const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRo
 					onSale: price.onSale,
 					lineTotal: price.lineTotal?.toFixed(2) ?? null,
 					// The "Mehr kaufen, mehr sparen" table for this role.
-					tiers: toPriceInputs(v.prices, v.priceTiers)
-						.find((p) => p.role === price.resolvedRole)
-						?.tiers?.map((tr) => ({
-							minQuantity: tr.minQuantity,
-							unitPrice:
-								resolvePrice({
-									role,
-									quantity: tr.minQuantity,
-									productPrices,
-									variantPrices: toPriceInputs(v.prices, v.priceTiers),
-								}).unitPrice?.toFixed(2) ?? null,
-						})) ??
-						productPrices
-							.find((p) => p.role === price.resolvedRole)
-							?.tiers?.map((tr) => ({
-								minQuantity: tr.minQuantity,
-								unitPrice:
-									resolvePrice({ role, quantity: tr.minQuantity, productPrices }).unitPrice?.toFixed(2) ??
-									null,
-							})) ??
-						[],
+					tiers: tierRows,
 				}
 			}),
 
@@ -224,6 +254,38 @@ const toPublicProduct = (row: ProductDetail, locale: LocaleCode, role: PricingRo
 						quantity: optionMoq > 0 ? optionMoq : 1,
 						productPrices: optionPrices,
 					}).unitPrice?.toFixed(2) ?? null,
+
+				/**
+				 * The option's own quantity ladder, priced.
+				 *
+				 * An option is a product, bought in its own quantity, at its own
+				 * tiers — the engraving on 500 cutters is not the same unit price as
+				 * the engraving on 50. Without this the configurator could only ever
+				 * show one figure and the customer would find the real one in the
+				 * cart.
+				 *
+				 * Built from the thresholds the resolved role actually has, and each
+				 * priced through the resolver, so it cannot disagree with what the
+				 * cart charges.
+				 */
+				tiers: [
+					...new Set(
+						(optionPrices.find((p) => p.role === role)?.tiers ?? optionPrices[0]?.tiers ?? []).map(
+							(tr) => tr.minQuantity
+						)
+					),
+				]
+					.sort((a, b) => a - b)
+					.map((minQuantity) => ({
+						minQuantity,
+						unitPrice:
+							resolvePrice({
+								quoteEnabled: o.optionProduct.quoteEnabled,
+								role,
+								quantity: minQuantity,
+								productPrices: optionPrices,
+							}).unitPrice?.toFixed(2) ?? null,
+					})),
 			}
 		}),
 	}
@@ -332,6 +394,8 @@ const SEARCH_VISIBILITIES = ["SHOP_AND_SEARCH", "SEARCH_ONLY"] as const
 const list = async (params: {
 	locale: LocaleCode
 	role: PricingRole
+	/// Signed-in caller, so a negotiated ladder shows on the archive too.
+	userId?: string | null
 	category?: string
 	search?: string
 	quantity: number
@@ -377,8 +441,16 @@ const list = async (params: {
 		prisma.product.count({ where }),
 	])
 
+	const externalTiers = await loadExternalTiers({
+		productIds: rows.map((r) => r.id),
+		role: params.role,
+		userId: params.userId,
+	})
+
 	return {
-		data: rows.map((r) => toPublicProduct(r, params.locale, params.role, params.quantity)),
+		data: rows.map((r) =>
+			toPublicProduct(r, params.locale, params.role, params.quantity, externalTiers(r.id))
+		),
 		meta: {
 			page: params.page,
 			limit: params.limit,
@@ -392,7 +464,9 @@ const getBySlug = async (
 	slug: string,
 	locale: LocaleCode,
 	role: PricingRole,
-	quantity: number
+	quantity: number,
+	/// Signed-in caller, so a ladder negotiated with them is honoured here too.
+	userId?: string | null
 ) => {
 	const row = await prisma.product.findFirst({
 		where: { translations: { some: { slug } }, status: "PUBLISHED" },
@@ -408,7 +482,13 @@ const getBySlug = async (
 		})
 	}
 
-	return toPublicProduct(row, locale, role, quantity)
+	const externalTiers = await loadExternalTiers({
+		productIds: [row.id],
+		role,
+		userId,
+	})
+
+	return toPublicProduct(row, locale, role, quantity, externalTiers(row.id))
 }
 
 /**

@@ -27,6 +27,15 @@ export const KNOWN_SETTINGS = {
 	"mail.fromName": "Display name on outgoing email",
 	"mail.fromAddress": "From address on outgoing email",
 	"mail.adminNotifyAddress": "Where new orders and quote requests are announced",
+	/**
+	 * Which quantity ladder wins when more than one could apply.
+	 *
+	 * Comma-separated, most specific first. Valid names are `customer`,
+	 * `catalogue` and `category`; anything else, or a list that does not name all
+	 * three exactly once, falls back to the default rather than silently dropping
+	 * a source.
+	 */
+	"pricing.tierPriority": "Order tier sources are tried in — customer,catalogue,category",
 } as const
 
 export interface CompanyDetails {

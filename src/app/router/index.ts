@@ -10,6 +10,7 @@ import { BundleRoutes } from "../modules/bundle/bundle.routes"
 import { CartRoutes } from "../modules/cart/cart.routes"
 import { AdminCategoryRoutes, CategoryRoutes } from "../modules/category/category.routes"
 import { MediaRoutes } from "../modules/media/media.routes"
+import { AdminPricingRoutes } from "../modules/pricing/pricing.routes"
 import { AdminProductRoutes, ProductRoutes } from "../modules/product/product.routes"
 import { AdminOrderRoutes, CheckoutRoutes, OrderRoutes } from "../modules/order/order.routes"
 import { PaymentRoutes } from "../modules/payment/payment.routes"
@@ -46,6 +47,7 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/admin/attributes", route: AdminAttributeRoutes },
 	{ path: "/products", route: ProductRoutes },
 	{ path: "/admin/products", route: AdminProductRoutes },
+	{ path: "/admin/pricing", route: AdminPricingRoutes },
 	{ path: "/media", route: MediaRoutes },
 	{ path: "/cart", route: CartRoutes },
 	{ path: "/configure", route: BundleRoutes },
