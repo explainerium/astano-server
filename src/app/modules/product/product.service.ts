@@ -35,7 +35,16 @@ const detailInclude = {
 			prices: true,
 			priceTiers: true,
 			image: true,
-			attributeValues: { include: { attributeValue: { include: { translations: true } } } },
+			// The attribute itself as well as the value: a specification table
+			// listing "Ø 60 mm" without saying it is the diameter is a list of
+			// numbers nobody can read.
+			attributeValues: {
+				include: {
+					attributeValue: {
+						include: { translations: true, attribute: { include: { translations: true } } },
+					},
+				},
+			},
 		},
 		orderBy: { sortOrder: "asc" },
 	},
@@ -216,10 +225,22 @@ const toPublicProduct = (
 					inStock: !v.manageStock || v.stock > 0 || v.allowBackorder,
 					stock: v.manageStock ? v.stock : null,
 					weightKg: v.weightKg?.toString() ?? null,
+					// The three dimensions the "Additional information" tab prints
+					// alongside the weight, exactly as WooCommerce does. Null where
+					// the admin left the field empty — an unset dimension is not zero.
+					lengthCm: v.lengthCm?.toString() ?? null,
+					widthCm: v.widthCm?.toString() ?? null,
+					heightCm: v.heightCm?.toString() ?? null,
 					image: toImage(v.image),
 					attributes: v.attributeValues.map((av) => ({
 						id: av.attributeValue.id,
+						/// The value — "Ø 60 mm". What the variant picker shows.
 						label: pickTranslation(av.attributeValue.translations, locale)?.label ?? av.attributeValue.code,
+						/// The attribute it belongs to — "Diameter". What the
+						/// specification table needs to make the value mean anything.
+						name:
+							pickTranslation(av.attributeValue.attribute.translations, locale)?.name ??
+							av.attributeValue.attribute.code,
 					})),
 					unitPrice: price.unitPrice?.toFixed(2) ?? null,
 					listPrice: price.listPrice?.toFixed(2) ?? null,
