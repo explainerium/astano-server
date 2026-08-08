@@ -16,6 +16,8 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 	const q = req.query as unknown as {
 		category?: string
 		search?: string
+		minPrice?: number
+		maxPrice?: number
 		quantity?: number
 		page?: number
 		limit?: number
@@ -29,6 +31,8 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 		userId: req.user?.sub,
 		category: q.category,
 		search: q.search,
+		minPrice: q.minPrice,
+		maxPrice: q.maxPrice,
 		quantity: Number(q.quantity ?? 1),
 		page: Number(q.page ?? 1),
 		limit: Number(q.limit ?? 24),

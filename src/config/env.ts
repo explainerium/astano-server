@@ -19,7 +19,19 @@ const envSchema = z.object({
 	JWT_REFRESH_EXPIRES_IN: z.string().default("30d"),
 
 	/// Where the API is reachable — used to build media URLs.
-	PUBLIC_BASE_URL: z.string().default("http://localhost:5000"),
+	/**
+	 * This API's own origin, trailing slash stripped.
+	 *
+	 * Every link built from it is `PUBLIC_BASE_URL + "/something"`, so a value
+	 * pasted with a trailing slash — which is what a hosting dashboard's copy
+	 * button usually hands you — produces `https://host//media/…` in emails and
+	 * media URLs. Browsers forgive it, which is exactly why it survives to
+	 * production. Normalised here so no consumer has to remember.
+	 */
+	PUBLIC_BASE_URL: z
+		.string()
+		.default("http://localhost:5000")
+		.transform((value) => value.replace(/\/+$/, "")),
 
 	/// "local" writes to ./storage and is the development default. "r2" requires
 	/// the R2_* values below.
@@ -37,7 +49,11 @@ const envSchema = z.object({
 	R2_SECRET_ACCESS_KEY: z.string().optional(),
 	R2_BUCKET_MEDIA: z.string().optional(),
 	R2_BUCKET_FILES: z.string().optional(),
-	R2_PUBLIC_URL: z.string().optional(),
+	/** Same normalisation — the driver joins it to a storage key with a slash. */
+	R2_PUBLIC_URL: z
+		.string()
+		.optional()
+		.transform((value) => value?.replace(/\/+$/, "")),
 
 	/**
 	 * Override the S3 endpoint to use a provider other than R2.

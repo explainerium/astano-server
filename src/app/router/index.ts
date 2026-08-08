@@ -9,6 +9,7 @@ import { AuthRoutes } from "../modules/auth/auth.routes"
 import { BundleRoutes } from "../modules/bundle/bundle.routes"
 import { CartRoutes } from "../modules/cart/cart.routes"
 import { AdminCategoryRoutes, CategoryRoutes } from "../modules/category/category.routes"
+import { AdminDashboardRoutes } from "../modules/dashboard/dashboard.routes"
 import { MediaRoutes } from "../modules/media/media.routes"
 import { AdminPricingRoutes } from "../modules/pricing/pricing.routes"
 import { AdminProductRoutes, ProductRoutes } from "../modules/product/product.routes"
@@ -40,6 +41,7 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/account", route: AccountRoutes },
 	{ path: "/b2b", route: B2bRoutes },
 	{ path: "/admin/b2b", route: AdminB2bRoutes },
+	{ path: "/admin/dashboard", route: AdminDashboardRoutes },
 	{ path: "/settings", route: SettingRoutes },
 	{ path: "/categories", route: CategoryRoutes },
 	{ path: "/admin/categories", route: AdminCategoryRoutes },

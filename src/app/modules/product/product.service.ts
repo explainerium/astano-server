@@ -163,6 +163,15 @@ const toPublicProduct = (
 				return { id: c.category.id, name: ct?.name ?? "", slug: ct?.slug ?? "" }
 			}),
 
+		/**
+		 * The variant a listing acts on.
+		 *
+		 * A card's wishlist button and its quick view both need something to add,
+		 * and a card has no variant picker. This is the same default the product
+		 * page opens on, so the two agree.
+		 */
+		defaultVariantId: defaultVariant?.id ?? null,
+
 		priceFrom: range.min?.toFixed(2) ?? null,
 		priceTo: range.max?.toFixed(2) ?? null,
 
@@ -408,6 +417,31 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 
 // ── Reads ────────────────────────────────────────────────────────────────────
 
+/**
+ * The cheapest and dearest "from" price in a set, for the filter's own track.
+ *
+ * Rounded outwards — down for the floor, up for the ceiling — so the extremes
+ * are always inside the range a slider can reach. A track that stops a cent
+ * short of the cheapest product makes it unselectable.
+ *
+ * Null when nothing in the set has a price: an all-quote-only category has no
+ * range, and a slider from 0 to 0 is worse than no slider.
+ */
+const priceBoundsOf = (
+	products: { priceFrom: string | null }[]
+): { min: number; max: number } | null => {
+	const values = products
+		.map((p) => (p.priceFrom === null ? null : Number(p.priceFrom)))
+		.filter((v): v is number => v !== null && Number.isFinite(v))
+
+	if (!values.length) return null
+
+	return {
+		min: Math.floor(Math.min(...values)),
+		max: Math.ceil(Math.max(...values)),
+	}
+}
+
 /** Only these two visibilities may appear in shop and category listings. */
 const SHOP_VISIBILITIES = ["SHOP_AND_SEARCH", "SHOP_ONLY"] as const
 const SEARCH_VISIBILITIES = ["SHOP_AND_SEARCH", "SEARCH_ONLY"] as const
@@ -419,6 +453,9 @@ const list = async (params: {
 	userId?: string | null
 	category?: string
 	search?: string
+	/// Inclusive bounds on the "from" price, as resolved for this visitor.
+	minPrice?: number
+	maxPrice?: number
 	quantity: number
 	page: number
 	limit: number
@@ -449,18 +486,39 @@ const list = async (params: {
 	}
 
 	const orderBy: Prisma.ProductOrderByWithRelationInput =
-		params.sort === "newest" ? { createdAt: "desc" } : { sortOrder: "asc" }
+		params.sort === "newest"
+			? { createdAt: "desc" }
+			: params.sort === "name"
+				? { translations: { _count: "desc" } }
+				: { sortOrder: "asc" }
 
-	const [rows, total] = await Promise.all([
-		prisma.product.findMany({
-			where,
-			include: detailInclude,
-			orderBy,
-			skip: (params.page - 1) * params.limit,
-			take: params.limit,
-		}),
-		prisma.product.count({ where }),
-	])
+	/**
+	 * Price is not a column, so filtering or sorting by it cannot be a query.
+	 *
+	 * What a product costs depends on the visitor's role, the quantity, and up
+	 * to three tier ladders — `resolvePrice` decides it, and the database has no
+	 * way to. `price_asc` used to fall through to `sortOrder` and silently do
+	 * nothing at all.
+	 *
+	 * So when price is actually involved, the whole matching set is loaded,
+	 * priced, then filtered, sorted and paginated in memory. That is a real cost
+	 * and it is paid **only** on those requests: an ordinary browse still lets
+	 * Postgres do the paging. With a catalogue of this size the difference is
+	 * milliseconds; if it ever grows into thousands of live products, a
+	 * materialised per-role price column is the answer, not a bigger `take`.
+	 */
+	const byPrice =
+		params.sort === "price_asc" ||
+		params.sort === "price_desc" ||
+		params.minPrice !== undefined ||
+		params.maxPrice !== undefined
+
+	const rows = await prisma.product.findMany({
+		where,
+		include: detailInclude,
+		orderBy,
+		...(byPrice ? {} : { skip: (params.page - 1) * params.limit, take: params.limit }),
+	})
 
 	const externalTiers = await loadExternalTiers({
 		productIds: rows.map((r) => r.id),
@@ -468,15 +526,65 @@ const list = async (params: {
 		userId: params.userId,
 	})
 
+	const priced = rows.map((r) =>
+		toPublicProduct(r, params.locale, params.role, params.quantity, externalTiers(r.id))
+	)
+
+	if (!byPrice) {
+		const total = await prisma.product.count({ where })
+		return {
+			data: priced,
+			meta: {
+				page: params.page,
+				limit: params.limit,
+				total,
+				totalPages: Math.ceil(total / params.limit) || 1,
+				priceBounds: priceBoundsOf(priced),
+			},
+		}
+	}
+
+	/**
+	 * Quote-only products have no price at any quantity (R2), so a price filter
+	 * cannot include or exclude them on merit — it simply does not apply to
+	 * them, and they drop out rather than being treated as free.
+	 */
+	const inRange = priced.filter((p) => {
+		if (params.minPrice === undefined && params.maxPrice === undefined) return true
+		if (p.priceFrom === null) return false
+		const from = Number(p.priceFrom)
+		if (params.minPrice !== undefined && from < params.minPrice) return false
+		if (params.maxPrice !== undefined && from > params.maxPrice) return false
+		return true
+	})
+
+	if (params.sort === "price_asc" || params.sort === "price_desc") {
+		const direction = params.sort === "price_asc" ? 1 : -1
+		inRange.sort((a, b) => {
+			// A product with no price sorts last either way — it is not the
+			// cheapest thing in the shop, it is unpriced.
+			const av = a.priceFrom === null ? Number.POSITIVE_INFINITY : Number(a.priceFrom)
+			const bv = b.priceFrom === null ? Number.POSITIVE_INFINITY : Number(b.priceFrom)
+			if (av === bv) return 0
+			if (!Number.isFinite(av)) return 1
+			if (!Number.isFinite(bv)) return -1
+			return (av - bv) * direction
+		})
+	}
+
+	const start = (params.page - 1) * params.limit
+
 	return {
-		data: rows.map((r) =>
-			toPublicProduct(r, params.locale, params.role, params.quantity, externalTiers(r.id))
-		),
+		data: inRange.slice(start, start + params.limit),
 		meta: {
 			page: params.page,
 			limit: params.limit,
-			total,
-			totalPages: Math.ceil(total / params.limit) || 1,
+			total: inRange.length,
+			totalPages: Math.ceil(inRange.length / params.limit) || 1,
+			// Bounds come from everything that matched the *other* filters, not
+			// from what survived the price filter — otherwise dragging the slider
+			// would shrink its own track.
+			priceBounds: priceBoundsOf(priced),
 		},
 	}
 }

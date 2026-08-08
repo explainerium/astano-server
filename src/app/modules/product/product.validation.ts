@@ -236,6 +236,9 @@ export const listProductsSchema = z.object({
 	query: z.object({
 		category: z.string().trim().optional(),
 		search: z.string().trim().max(200).optional(),
+		/// Inclusive bounds on the resolved "from" price.
+		minPrice: z.coerce.number().min(0).optional(),
+		maxPrice: z.coerce.number().min(0).optional(),
 		quantity: z.coerce.number().int().min(1).default(1),
 		page: z.coerce.number().int().min(1).default(1),
 		limit: z.coerce.number().int().min(1).max(100).default(24),
