@@ -1,6 +1,7 @@
 import { env } from "../../config"
 import type { LocaleCode } from "../../config/locales"
 import { t } from "../../i18n"
+import type { BankAccount } from "../../domain/payment/bankAccounts"
 import { SettingService } from "../../app/modules/setting/setting.service"
 import { esc, renderLayout, rowsTable, toPlainText } from "./layout"
 import { sendMail } from "./transport"
@@ -30,6 +31,43 @@ interface OrderMailInput {
 	items: { name: string; quantity: number; lineTotal: string }[]
 	paymentTitle?: string | null
 	paymentInstructions?: string | null
+	/** Frozen on the order. For a bank transfer this is the whole point of the email. */
+	bankAccounts?: BankAccount[]
+}
+
+/**
+ * The bank details, as labelled rows.
+ *
+ * This is the part of a bank-transfer email that has a job to do: the customer
+ * opens their banking app beside it and copies. Rows with a label beside each
+ * value are what makes that possible — an IBAN in the middle of a sentence gets
+ * mistyped, and money sent to a mistyped IBAN is a support case measured in
+ * weeks.
+ *
+ * Empty fields are dropped rather than shown blank, so a shop that only holds
+ * an IBAN and BIC does not email a form with three gaps in it.
+ */
+const bankAccountsHtml = (accounts: BankAccount[], L: (key: string) => string): string => {
+	if (!accounts.length) return ""
+
+	return accounts
+		.map((account) => {
+			const rows = [
+				[L("email.bank.accountName"), account.accountName],
+				[L("email.bank.bankName"), account.bankName],
+				[L("email.bank.accountNumber"), account.accountNumber],
+				[L("email.bank.iban"), account.iban],
+				[L("email.bank.bic"), account.bic],
+				[L("email.bank.country"), account.countryCode],
+			].filter(([, value]) => Boolean(value)) as [string, string][]
+
+			const heading = account.label
+				? `<p style="margin:16px 0 4px;font-size:13px;font-weight:600;">${esc(account.label)}</p>`
+				: ""
+
+			return heading + rowsTable(rows.map(([label, value]) => ({ label, value })))
+		})
+		.join("")
 }
 
 export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void> => {
@@ -50,10 +88,16 @@ export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void
 		{ label: L("email.total"), value: `${input.grandTotal} ${input.currency}`, strong: true },
 	])
 
-	const paymentHtml = input.paymentInstructions
-		? `<h2 style="margin:28px 0 8px;font-size:16px;">${esc(input.paymentTitle ?? L("email.payment"))}</h2>
-       <p style="margin:0;font-size:14px;line-height:1.6;white-space:pre-line;">${esc(input.paymentInstructions)}</p>`
-		: ""
+	const accounts = input.bankAccounts ?? []
+
+	const paymentHtml =
+		input.paymentInstructions || accounts.length
+			? `<h2 style="margin:28px 0 8px;font-size:16px;">${esc(input.paymentTitle ?? L("email.payment"))}</h2>` +
+				(input.paymentInstructions
+					? `<p style="margin:0;font-size:14px;line-height:1.6;white-space:pre-line;">${esc(input.paymentInstructions)}</p>`
+					: "") +
+				bankAccountsHtml(accounts, L)
+			: ""
 
 	sendMail(
 		{
@@ -64,6 +108,21 @@ export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void
 				...input.items.map((i) => `${i.quantity} × ${i.name} — ${i.lineTotal} ${input.currency}`),
 				`${L("email.total")}: ${input.grandTotal} ${input.currency}`,
 				...(input.paymentInstructions ? ["", input.paymentInstructions] : []),
+				// The plain-text part matters here: a mail client with images and
+				// tables blocked still has to be able to show somebody an IBAN.
+				...accounts.flatMap((account) =>
+					[
+						"",
+						account.label ?? "",
+						account.accountName ? `${L("email.bank.accountName")}: ${account.accountName}` : "",
+						account.bankName ? `${L("email.bank.bankName")}: ${account.bankName}` : "",
+						account.accountNumber
+							? `${L("email.bank.accountNumber")}: ${account.accountNumber}`
+							: "",
+						account.iban ? `${L("email.bank.iban")}: ${account.iban}` : "",
+						account.bic ? `${L("email.bank.bic")}: ${account.bic}` : "",
+					].filter(Boolean)
+				),
 			]),
 			replyTo: company.email || undefined,
 		},

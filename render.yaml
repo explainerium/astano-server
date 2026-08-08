@@ -53,6 +53,20 @@ services:
       - key: JWT_REFRESH_SECRET
         generateValue: true
 
+      # Encrypts the payment credentials the client enters in the dashboard.
+      #
+      # `sync: false` and NOT `generateValue`, deliberately. A generated value is
+      # one nobody has written down, and recreating this service from the
+      # blueprint would generate a different one — at which point every stored
+      # Stripe and PayPal key decrypts to nothing and the client has to paste
+      # them all in again with the shop unable to take payment.
+      #
+      # Set it once in the Render dashboard, keep a copy somewhere safe, and
+      # treat it as permanent:
+      #   openssl rand -hex 32
+      - key: CREDENTIALS_KEY
+        sync: false
+
       # ── The two that decide whether guest carts work ────────────────────
       #
       # A Vercel frontend and a Render API are different sites, so every API

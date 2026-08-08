@@ -21,25 +21,12 @@ const getById: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
-const create: RequestHandler = catchAsync(async (req, res) => {
-	sendResponse(res, {
-		statusCode: httpStatus.CREATED,
-		message: t("payment.created", req.locale),
-		data: await PaymentService.create(req.body, req.locale),
-	})
-})
-
 const update: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
 		message: t("payment.updated", req.locale),
 		data: await PaymentService.update(req.params.id as string, req.body, req.locale),
 	})
-})
-
-const remove: RequestHandler = catchAsync(async (req, res) => {
-	await PaymentService.remove(req.params.id as string)
-	sendResponse(res, { statusCode: httpStatus.OK, message: t("payment.deleted", req.locale) })
 })
 
 const available: RequestHandler = catchAsync(async (req, res) => {
@@ -60,4 +47,12 @@ const available: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
-export const PaymentController = { list, getById, create, update, remove, available }
+const remove: RequestHandler = catchAsync(async (req, res) => {
+	await PaymentService.remove(req.params.id as string)
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("payment.deleted", req.locale),
+	})
+})
+
+export const PaymentController = { list, getById, update, remove, available }

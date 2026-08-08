@@ -2,6 +2,7 @@ import Decimal from "decimal.js"
 import { Prisma, type OrderStatus, type PaymentStatus } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
+import { readBankAccounts } from "../../../domain/payment/bankAccounts"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
@@ -91,6 +92,9 @@ const view = (row: OrderRow, opts: { staff?: boolean } = {}) => ({
 				code: row.paymentMethodCode,
 				title: row.paymentMethodTitle,
 				instructions: row.paymentInstructions,
+				// Read from the order, not from the method. These are what this
+				// customer was told; the shop's current details may differ.
+				bankAccounts: readBankAccounts({ bankAccounts: row.paymentAccounts }),
 			}
 		: null,
 	vatNumber: row.vatNumber,
@@ -371,6 +375,16 @@ const quoteCart = async (params: QuoteParams) => {
 			})
 		}
 	}
+	/*
+	 * No destination, no delivery options — deliberately.
+	 *
+	 * Cost depends on the zone and the weight, so a method listed before the
+	 * address could only show a price it does not have. Payment is different and
+	 * is listed straight away: what a customer may pay with barely depends on
+	 * where the parcel goes, so making them fill a form to find out is a needless
+	 * gate. `hasDestination` below is what lets the checkout tell "nothing yet"
+	 * apart from "nothing that reaches you".
+	 */
 
 	// ── tax ─────────────────────────────────────────────────────────────────
 	// One tax class per order, taken from the default class. Per-product classes
@@ -472,6 +486,15 @@ const preview = async (params: QuoteParams) => {
 		reverseCharged: q.tax.reverseCharged,
 		taxUnconfigured: q.tax.unconfigured,
 		taxLines: q.tax.lines,
+		/**
+		 * Whether a delivery country was supplied.
+		 *
+		 * Lets the checkout distinguish "you have not told us where yet" from "we
+		 * do not deliver there" — both leave shippingOptions empty, and showing a
+		 * red "we cannot deliver to you" on a page nobody has typed an address
+		 * into is alarming and wrong.
+		 */
+		hasDestination: Boolean(params.shippingCountry),
 		shippingOptions: q.shippingOptions,
 		paymentMethods: q.eligibility.map((e) => {
 			const m = q.methodsById.get(e.methodId)
@@ -537,6 +560,7 @@ const place = async (
 
 	const paymentMethod = q.methodsById.get(params.paymentMethodId)!
 	const paymentText = pick(paymentMethod.translations, params.locale)
+	const frozenAccounts = readBankAccounts(paymentMethod.config)
 
 	const order = await prisma.$transaction(async (tx) => {
 		const created = await tx.order.create({
@@ -557,6 +581,12 @@ const place = async (
 				paymentMethodCode: paymentMethod.code,
 				paymentMethodTitle: paymentText?.title ?? paymentMethod.code,
 				paymentInstructions: paymentText?.instructions ?? null,
+				// Copied, not referenced — see Order.paymentAccounts. An empty list
+				// stores as JSON null so a bank-transfer order placed before any
+				// account was entered is distinguishable from one with none.
+				paymentAccounts: frozenAccounts.length
+					? (frozenAccounts as unknown as Prisma.InputJsonValue)
+					: Prisma.JsonNull,
 				vatNumber: params.vatNumber ?? q.user?.vatNumber ?? null,
 				vatValidated: q.user?.vatValidated ?? false,
 				reverseCharged: q.tax.reverseCharged,
@@ -664,6 +694,7 @@ const place = async (
 			items: result.items.map((i) => ({ name: i.name, quantity: i.quantity, lineTotal: i.lineTotal })),
 			paymentTitle: result.paymentMethod?.title ?? null,
 			paymentInstructions: result.paymentMethod?.instructions ?? null,
+			bankAccounts: result.paymentMethod?.bankAccounts ?? [],
 		})
 	}
 

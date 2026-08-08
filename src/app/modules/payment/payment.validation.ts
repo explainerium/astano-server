@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { SUPPORTED_LOCALES } from "../../../config/locales"
+import { bankAccountsSchema } from "../../../domain/payment/bankAccounts"
 
 const locale = z.enum(SUPPORTED_LOCALES as unknown as [string, ...string[]])
 const decimal = z.union([z.string().regex(/^\d+(\.\d{1,4})?$/), z.number().nonnegative()])
@@ -29,24 +30,22 @@ const rules = {
 	requiresValidatedVatId: z.boolean().default(false),
 }
 
-export const createMethodSchema = z.object({
-	body: z.object({
-		code,
-		type: z.enum(["BANK_TRANSFER", "INVOICE", "CASH_ON_DELIVERY", "OTHER"]).default("BANK_TRANSFER"),
-		isActive: z.boolean().default(true),
-		sortOrder: z.number().int().default(0),
-		...rules,
-		/// Method-specific settings — bank account details, for instance.
-		config: z.record(z.string(), z.unknown()).nullable().optional(),
-		translations: z.array(translation).min(1),
-	}),
-})
+/**
+ * Method settings. Still open-ended, but the part the customer sees is typed.
+ *
+ * `bankAccounts` is validated because it ends up on a thank-you page and in an
+ * email — a malformed IBAN saved here is a customer sending money nowhere.
+ * Everything else stays free-form so a future provider needs no migration.
+ */
+const methodConfig = z
+	.record(z.string(), z.unknown())
+	.and(z.object({ bankAccounts: bankAccountsSchema.optional() }))
+	.nullable()
+	.optional()
 
 export const updateMethodSchema = z.object({
 	params: z.object({ id: z.string().uuid() }),
 	body: z.object({
-		code: code.optional(),
-		type: z.enum(["BANK_TRANSFER", "INVOICE", "CASH_ON_DELIVERY", "OTHER"]).optional(),
 		isActive: z.boolean().optional(),
 		sortOrder: z.number().int().optional(),
 		allowedCountries: z.array(countryCode).optional(),
@@ -56,7 +55,7 @@ export const updateMethodSchema = z.object({
 		minOrderTotal: decimal.nullable().optional(),
 		maxOrderTotal: decimal.nullable().optional(),
 		requiresValidatedVatId: z.boolean().optional(),
-		config: z.record(z.string(), z.unknown()).nullable().optional(),
+		config: methodConfig,
 		translations: z.array(translation).optional(),
 	}),
 })
@@ -71,7 +70,6 @@ export const availableSchema = z.object({
 })
 
 export const PaymentValidation = {
-	createMethodSchema,
 	updateMethodSchema,
 	idSchema,
 	availableSchema,

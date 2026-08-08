@@ -98,8 +98,27 @@ describe("gatewayEligibility", () => {
 		expect(evaluateMethod(german, { ...guest, billingCountry: "DE" }).eligible).toBe(true)
 	})
 
-	it("rejects when a country restriction exists but no country is known", () => {
+	/**
+	 * Still rejected — only the reason differs, and the difference matters.
+	 *
+	 * "Not available in your country" said before anyone has entered an address
+	 * is simply false, and the checkout prints these reasons to the customer. A
+	 * German buyer told their country is excluded, only for the option to appear
+	 * once they finish typing, has been shown a bug that is not there.
+	 */
+	it("holds a country-restricted method back until the country is known", () => {
 		const german = { ...open, allowedCountries: ["DE"] }
-		expect(evaluateMethod(german, { ...guest, billingCountry: null }).reason).toBe("COUNTRY_NOT_ALLOWED")
+		const verdict = evaluateMethod(german, { ...guest, billingCountry: null })
+
+		expect(verdict.eligible).toBe(false)
+		expect(verdict.reason).toBe("AWAITING_COUNTRY")
+	})
+
+	it("rejects outright once the country is known and excluded", () => {
+		const german = { ...open, allowedCountries: ["DE"] }
+		const verdict = evaluateMethod(german, { ...guest, billingCountry: "US" })
+
+		expect(verdict.eligible).toBe(false)
+		expect(verdict.reason).toBe("COUNTRY_NOT_ALLOWED")
 	})
 })

@@ -16,8 +16,93 @@ enum PaymentMethodType {
   INVOICE
   /// Pay on delivery.
   CASH_ON_DELIVERY
+  /// Handed to a provider — Stripe, PayPal. See PaymentMethod.gateway.
+  GATEWAY
   /// Anything configured later.
   OTHER
+}
+
+enum PaymentGatewayProvider {
+  STRIPE
+  PAYPAL
+}
+
+/// Test keys and live keys are stored side by side, so switching between them
+/// is a toggle rather than a re-entry — and so going back to test to reproduce
+/// a problem does not destroy the live configuration.
+enum PaymentGatewayMode {
+  TEST
+  LIVE
+}
+
+/**
+ * A payment provider's configuration, entered by the client in the dashboard.
+ *
+ * Credentials belong here rather than in environment variables. The client
+ * signs up for Stripe themselves and holds their own keys; asking them to send
+ * those keys to a developer, who then pastes them into a hosting dashboard and
+ * redeploys, is both worse security and worse for them. Here they paste, press
+ * Test, and see whether it worked.
+ *
+ * **Every value inside the credential blobs is encrypted** — including the
+ * publishable key, which is not secret. Sealing everything means there is no
+ * per-field rule to remember and no way to add a field and forget; the values
+ * that are safe to publish are decrypted and handed out deliberately, in code
+ * that says so. See shared/secretBox.ts.
+ */
+model PaymentGateway {
+  id       String                 @id @default(uuid())
+  provider PaymentGatewayProvider @unique
+
+  /// Off until it has been configured and tested. Never defaults to on.
+  isActive Boolean            @default(false)
+  mode     PaymentGatewayMode @default(TEST)
+
+  /// Sealed blobs, shape decided by the provider's adapter. Stripe holds
+  /// publishableKey / secretKey / webhookSecret; PayPal clientId /
+  /// clientSecret / webhookId.
+  testCredentials Json?
+  liveCredentials Json?
+
+  /// Which of the provider's methods are offered — "card", "klarna", "sepa_debit".
+  /// Empty means card only, which is what every provider here supports.
+  enabledMethods String[] @default([])
+
+  /// The last connection test. A gateway cannot be switched live until the live
+  /// credentials have passed one, so a half-pasted key never reaches a customer.
+  testedAt     DateTime?
+  testedMode   PaymentGatewayMode?
+  testSucceeded Boolean?
+  testMessage  String?
+
+  methods PaymentMethod[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("payment_gateways")
+}
+
+/**
+ * Webhook deliveries already handled.
+ *
+ * Providers retry, and they deliver at-least-once by design — the same
+ * "payment succeeded" can arrive three times. Without this a retry would mark
+ * an order paid twice, or worse, run whatever else success triggers twice. The
+ * unique constraint is the whole mechanism: inserting is the claim.
+ */
+model PaymentWebhookEvent {
+  id       String                 @id @default(uuid())
+  provider PaymentGatewayProvider
+
+  /// The provider's own event id — evt_… for Stripe, WH-… for PayPal.
+  eventId String
+  type    String?
+
+  receivedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+  @@map("payment_webhook_events")
 }
 
 model PaymentMethod {
@@ -54,7 +139,17 @@ model PaymentMethod {
 
   /// Bank details for BANK_TRANSFER, or whatever a future method needs.
   /// Free-form so adding a provider does not need a migration.
+  ///
+  /// **Not for secrets** — this column is plaintext and is returned to the
+  /// admin screen as-is. Provider credentials live on PaymentGateway, sealed.
   config Json?
+
+  /// Set for type GATEWAY. Keeping the gateway behind a PaymentMethod row means
+  /// Stripe inherits the whole eligibility system for free — "cards only over
+  /// €50", "not for this country" — instead of growing a second set of rules
+  /// that behave almost but not quite the same.
+  gatewayId String?
+  gateway   PaymentGateway? @relation(fields: [gatewayId], references: [id], onDelete: SetNull)
 
   translations PaymentMethodTranslation[]
 

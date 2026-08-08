@@ -272,5 +272,18 @@
 	"email.emailChange.ignore": "Falls Sie das nicht angefordert haben, können Sie diese E-Mail ignorieren — es wird sich nichts ändern.",
 	"email.emailChanged.subject": "Ihre E-Mail-Adresse wurde geändert",
 	"email.emailChanged.title": "Ihre E-Mail-Adresse wurde geändert",
-	"email.emailChanged.intro": "Die Adresse Ihres astano-Kontos lautet jetzt {email}. Diese Nachricht geht an Ihre frühere Adresse, damit Sie davon erfahren. Falls das nicht Sie waren, melden Sie sich bitte sofort bei uns — dies ist die letzte E-Mail an diese Adresse."
+	"email.emailChanged.intro": "Die Adresse Ihres astano-Kontos lautet jetzt {email}. Diese Nachricht geht an Ihre frühere Adresse, damit Sie davon erfahren. Falls das nicht Sie waren, melden Sie sich bitte sofort bei uns — dies ist die letzte E-Mail an diese Adresse.",
+	"payment.credentialsSaved": "Zugangsdaten gespeichert. Führen Sie einen Verbindungstest durch, bevor Sie dies aktivieren.",
+	"payment.gatewayUpdated": "Zahlungsanbieter aktualisiert.",
+	"payment.untested": "Führen Sie zuerst einen erfolgreichen Verbindungstest durch.",
+	"payment.unknownMethod": "Diese Zahlungsart bietet dieser Anbieter nicht an.",
+	"payment.noMethods": "Ein aktiver Anbieter braucht mindestens eine Zahlungsart.",
+	"email.bank.accountName": "Kontoinhaber",
+	"email.bank.bankName": "Bank",
+	"email.bank.accountNumber": "Kontonummer",
+	"email.bank.iban": "IBAN",
+	"email.bank.bic": "BIC / SWIFT",
+	"email.bank.country": "Land",
+	"payment.builtIn": "Dies ist eine Standard-Zahlungsart — deaktivieren Sie sie, statt sie zu löschen.",
+	"payment.inUse": "Mit dieser Zahlungsart wurden Bestellungen bezahlt — deaktivieren Sie sie, statt sie zu löschen."
 }

@@ -40,6 +40,7 @@
     "puppeteer": "^25.4.0",
     "sharp": "^0.35.3",
     "slugify": "^1.6.9",
+    "stripe": "^22.4.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

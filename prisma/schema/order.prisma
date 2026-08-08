@@ -77,6 +77,36 @@ model Order {
   /// Bank details or similar, as shown to this customer at this moment.
   paymentInstructions String?
 
+  /**
+   * The bank accounts the customer was told to pay into, copied not referenced.
+   *
+   * Frozen for the same reason the address is. A shop that changes bank must not
+   * silently rewrite the IBAN on an order somebody has already been asked to
+   * pay — the customer holds an email with the old one, and the thank-you page
+   * has to keep agreeing with it. Reading this live would also mean a deleted
+   * payment method erasing the instructions from every order that used it.
+   *
+   * Shape is domain/payment/bankAccounts.ts.
+   */
+  paymentAccounts Json?
+
+  /// Which provider handled it, when one did. Null for bank transfer.
+  paymentProvider PaymentGatewayProvider?
+
+  /**
+   * The provider's own identifier — a Stripe PaymentIntent, a PayPal order.
+   *
+   * This is how a webhook finds its order. Indexed and unique because a
+   * provider retries the same event and two orders must never claim one
+   * payment; unique here turns that from a race into a constraint violation.
+   */
+  paymentReference String? @unique
+
+  /// True once the money is confirmed by the provider rather than by a human
+  /// reading a bank statement. Kept apart from paymentStatus so a manually
+  /// marked bank transfer is never mistaken for a gateway confirmation.
+  paymentConfirmedAt DateTime?
+
   // ── VAT ───────────────────────────────────────────────────────────────────
   vatNumber      String?
   vatValidated   Boolean @default(false)

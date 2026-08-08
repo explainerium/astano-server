@@ -18,6 +18,22 @@ const envSchema = z.object({
 	JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
 	JWT_REFRESH_EXPIRES_IN: z.string().default("30d"),
 
+	/**
+	 * Encrypts the payment credentials the client enters in the dashboard.
+	 *
+	 * The one secret that stays in the environment, because it is what protects
+	 * every secret that does not. A database dump without this yields no usable
+	 * API keys.
+	 *
+	 * Generate with:
+	 *   openssl rand -hex 32
+	 *
+	 * **Changing it makes every stored credential unreadable** — the client would
+	 * have to paste their Stripe and PayPal keys in again. Treat it as permanent
+	 * once a gateway is live, and set it in the hosting dashboard, never here.
+	 */
+	CREDENTIALS_KEY: z.string().min(16).default("dev-credentials-key-change-me-please"),
+
 	/// Where the API is reachable — used to build media URLs.
 	/**
 	 * This API's own origin, trailing slash stripped.

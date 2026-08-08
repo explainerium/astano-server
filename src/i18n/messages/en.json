@@ -272,5 +272,18 @@
 	"email.emailChange.ignore": "If you did not request this, you can ignore this email — nothing will change.",
 	"email.emailChanged.subject": "Your email address was changed",
 	"email.emailChanged.title": "Your email address was changed",
-	"email.emailChanged.intro": "The address on your astano account is now {email}. This message is going to your previous address so you know it happened. If it was not you, contact us straight away — this is the last mail this address will receive."
+	"email.emailChanged.intro": "The address on your astano account is now {email}. This message is going to your previous address so you know it happened. If it was not you, contact us straight away — this is the last mail this address will receive.",
+	"payment.credentialsSaved": "Credentials saved. Run a connection test before switching this on.",
+	"payment.gatewayUpdated": "Payment gateway updated.",
+	"payment.untested": "Run a successful connection test before switching this on.",
+	"payment.unknownMethod": "That payment method is not offered by this provider.",
+	"payment.noMethods": "An active gateway needs at least one payment method.",
+	"email.bank.accountName": "Account holder",
+	"email.bank.bankName": "Bank",
+	"email.bank.accountNumber": "Account number",
+	"email.bank.iban": "IBAN",
+	"email.bank.bic": "BIC / SWIFT",
+	"email.bank.country": "Country",
+	"payment.builtIn": "This is a standard method — switch it off instead of deleting it.",
+	"payment.inUse": "Orders were paid with this method — switch it off instead of deleting it."
 }

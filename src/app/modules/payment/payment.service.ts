@@ -2,6 +2,8 @@
 import { Prisma } from "@prisma/client"
 import type { UserRole } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
+import { readBankAccounts } from "../../../domain/payment/bankAccounts"
+import { DEFAULT_RULES, OFFLINE_METHODS } from "../../../domain/payment/offlineMethods"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
@@ -32,13 +34,27 @@ const adminView = (row: MethodRow, locale: LocaleCode) => ({
 		requiresValidatedVatId: row.requiresValidatedVatId,
 	},
 	config: row.config,
+	/**
+	 * One of the three fixed kinds, rather than a leftover from the old
+	 * "create a method and pick a type" builder.
+	 *
+	 * A built-in cannot be deleted — switching it off is how you retire one. A
+	 * leftover can be, provided nothing has been bought with it, because
+	 * otherwise a shop that experimented with the old builder is stuck looking
+	 * at two bank transfers forever.
+	 */
+	isBuiltIn: OFFLINE_METHODS.some((definition) => definition.code === row.code),
 	createdAt: row.createdAt,
 })
 
 /**
- * Customer view. `config` is deliberately absent — bank details belong in the
- * localized `instructions`, which the customer is meant to read, not in a raw
- * settings blob that might hold anything.
+ * Customer view.
+ *
+ * `config` as a whole stays out — it is a free-form settings blob that might
+ * hold anything. `bankAccounts` is lifted out of it deliberately, because those
+ * details exist for precisely one purpose: telling the customer where to send
+ * the money. Keeping them buried would mean the shop typing the same IBAN a
+ * second time into a text field, and the two drifting apart.
  */
 const publicView = (row: MethodRow, locale: LocaleCode) => {
 	const t = pick(row.translations, locale)
@@ -49,6 +65,7 @@ const publicView = (row: MethodRow, locale: LocaleCode) => {
 		title: t?.title ?? row.code,
 		description: t?.description ?? null,
 		instructions: t?.instructions ?? null,
+		bankAccounts: readBankAccounts(row.config),
 	}
 }
 
@@ -57,37 +74,63 @@ const notFound = () =>
 		messageKey: "payment.notFound",
 	})
 
+/**
+ * Creates any of the three fixed kinds that are not in the database yet.
+ *
+ * Called at startup, not lazily from whichever screen happens to be opened
+ * first. An earlier version materialised these inside the admin `list()`, which
+ * meant a shop whose staff had not yet opened the payments screen served a
+ * checkout with **no payment methods at all** — the customer-facing path reads
+ * the table directly and had nothing to read.
+ *
+ * Idempotent and cheap: one count when everything is already there.
+ *
+ * Rows that predate the registry are left alone. A shop that has already taken
+ * orders through a custom method must not have it vanish.
+ */
+const ensureOfflineMethods = async (): Promise<number> => {
+	const existing = await prisma.paymentMethod.findMany({ select: { code: true } })
+	const known = new Set(existing.map((row) => row.code))
+
+	const missing = OFFLINE_METHODS.filter((definition) => !known.has(definition.code))
+	if (!missing.length) return 0
+
+	await prisma.$transaction(
+		missing.map((definition) =>
+			prisma.paymentMethod.create({
+				data: {
+					code: definition.code,
+					type: definition.type,
+					isActive: definition.activeByDefault,
+					sortOrder: definition.sortOrder,
+					...(DEFAULT_RULES[definition.code] ?? {}),
+					translations: { create: definition.translations },
+				},
+			})
+		)
+	)
+
+	return missing.length
+}
+
+/**
+ * Every offline method, always all of them.
+ *
+ * The kinds are fixed, so this is a plain read — `ensureOfflineMethods` has
+ * already run at startup. It is called again here as a safety net for the one
+ * case startup cannot cover: a release that adds a kind to the registry while
+ * an old process is still serving.
+ */
 const list = async (locale: LocaleCode) => {
+	await ensureOfflineMethods()
+
 	const rows = await prisma.paymentMethod.findMany({ include, orderBy: { sortOrder: "asc" } })
-	return rows.map((r) => adminView(r, locale))
+	return rows.map((row) => adminView(row, locale))
 }
 
 const getById = async (id: string, locale: LocaleCode) => {
 	const row = await prisma.paymentMethod.findUnique({ where: { id }, include })
 	if (!row) throw notFound()
-	return adminView(row, locale)
-}
-
-const create = async (payload: Record<string, unknown>, locale: LocaleCode) => {
-	const row = await prisma.paymentMethod.create({
-		data: {
-			code: payload.code as string,
-			type: payload.type as never,
-			isActive: (payload.isActive as boolean) ?? true,
-			sortOrder: (payload.sortOrder as number) ?? 0,
-			allowedCountries: (payload.allowedCountries as string[]) ?? [],
-			allowedRoles: (payload.allowedRoles as UserRole[]) ?? [],
-			requiresLogin: (payload.requiresLogin as boolean) ?? false,
-			minCompletedOrders: (payload.minCompletedOrders as number) ?? 0,
-			minOrderTotal: payload.minOrderTotal != null ? String(payload.minOrderTotal) : null,
-			maxOrderTotal: payload.maxOrderTotal != null ? String(payload.maxOrderTotal) : null,
-			requiresValidatedVatId: (payload.requiresValidatedVatId as boolean) ?? false,
-			config: (payload.config as Prisma.InputJsonValue) ?? Prisma.JsonNull,
-			translations: { create: payload.translations as never },
-		},
-		include,
-	})
-
 	return adminView(row, locale)
 }
 
@@ -98,8 +141,9 @@ const update = async (id: string, payload: Record<string, unknown>, locale: Loca
 		await tx.paymentMethod.update({
 			where: { id },
 			data: {
-				...(payload.code !== undefined ? { code: payload.code as string } : {}),
-				...(payload.type !== undefined ? { type: payload.type as never } : {}),
+				// code and type are deliberately absent. A method's kind is what it is;
+				// editing it would silently change how checkout, the thank-you page and
+				// the invoice treat orders already placed against it.
 				...(payload.isActive !== undefined ? { isActive: payload.isActive as boolean } : {}),
 				...(payload.sortOrder !== undefined ? { sortOrder: payload.sortOrder as number } : {}),
 				...(payload.allowedCountries !== undefined ? { allowedCountries: payload.allowedCountries as string[] } : {}),
@@ -138,11 +182,6 @@ const update = async (id: string, payload: Record<string, unknown>, locale: Loca
 	})
 
 	return getById(id, locale)
-}
-
-const remove = async (id: string) => {
-	if (!(await prisma.paymentMethod.findUnique({ where: { id } }))) throw notFound()
-	await prisma.paymentMethod.delete({ where: { id } })
 }
 
 /**
@@ -200,11 +239,61 @@ const available = async (
 
 	const byId = new Map(rows.map((r) => [r.id, r]))
 
+	/*
+	 * Every active method, with its title, eligible or not.
+	 *
+	 * An earlier version returned only an id and a code for the ineligible ones,
+	 * which meant the checkout could not name them — so they rendered as blank
+	 * rows or had to be hidden. Hiding them is worse than showing them: a
+	 * customer who cannot see "Payment by invoice" at all has no way to learn it
+	 * exists, whereas one who sees it greyed out with a reason knows what to do
+	 * about it. Nothing here is secret; the rules are printed on the page.
+	 */
 	return verdicts.map((v) => ({
-		...(v.eligible ? publicView(byId.get(v.methodId)!, locale) : { id: v.methodId, code: v.code }),
+		...publicView(byId.get(v.methodId)!, locale),
 		eligible: v.eligible,
 		...(v.reason ? { reason: v.reason } : {}),
 	}))
 }
 
-export const PaymentService = { list, getById, create, update, remove, available }
+/**
+ * Removes a leftover from the old builder.
+ *
+ * Nothing is created any more, so this only ever cleans up: a row somebody made
+ * back when the admin offered "new payment method", now sitting beside the
+ * built-in kind it duplicates.
+ *
+ * Two refusals. A built-in kind is never deleted — switching it off is how you
+ * retire one, and deleting it would only have it reappear on the next read. A
+ * method that has taken an order is never deleted either: the order keeps a
+ * frozen copy of the title and instructions, but the link is what a refund or a
+ * query is traced through.
+ */
+const remove = async (id: string): Promise<void> => {
+	const row = await prisma.paymentMethod.findUnique({ where: { id } })
+	if (!row) throw notFound()
+
+	if (OFFLINE_METHODS.some((definition) => definition.code === row.code)) {
+		throw new ApiError(httpStatus.CONFLICT, "This is a standard method — switch it off instead", {
+			messageKey: "payment.builtIn",
+		})
+	}
+
+	const used = await prisma.order.count({ where: { paymentMethodId: id } })
+	if (used > 0) {
+		throw new ApiError(
+			httpStatus.CONFLICT,
+			`${used} order(s) were paid this way — switch it off instead`,
+			{ messageKey: "payment.inUse" }
+		)
+	}
+
+	await prisma.paymentMethod.delete({ where: { id } })
+}
+
+/*
+ * No create. The offline kinds are a fixed set materialised by list(), so there
+ * is nothing to make — only the three to configure, and the occasional leftover
+ * to clear away.
+ */
+export const PaymentService = { ensureOfflineMethods, list, getById, update, remove, available }

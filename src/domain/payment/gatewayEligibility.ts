@@ -42,6 +42,18 @@ export type IneligibleReason =
 	| "INACTIVE"
 	| "REQUIRES_LOGIN"
 	| "COUNTRY_NOT_ALLOWED"
+	/**
+	 * Restricted by country, and the destination is not known yet.
+	 *
+	 * Kept apart from COUNTRY_NOT_ALLOWED because the two mean opposite things
+	 * to the person reading them. Before an address is typed, "not available in
+	 * your country" is simply false — nobody has said which country it is — and
+	 * telling a German customer their country is excluded, only for the option
+	 * to appear once they finish typing, reads as a broken shop.
+	 *
+	 * Still ineligible, so nothing can be selected or ordered against it.
+	 */
+	| "AWAITING_COUNTRY"
 	| "ROLE_NOT_ALLOWED"
 	| "NOT_ENOUGH_ORDER_HISTORY"
 	| "ORDER_TOTAL_TOO_LOW"
@@ -73,7 +85,11 @@ export const evaluateMethod = (
 	// Empty list means no restriction, which is why it is the default.
 	if (method.allowedCountries.length) {
 		const country = ctx.billingCountry?.toUpperCase()
-		if (!country || !method.allowedCountries.map((c) => c.toUpperCase()).includes(country)) {
+
+		// Not yet asked is not the same as not allowed. See AWAITING_COUNTRY.
+		if (!country) return no("AWAITING_COUNTRY")
+
+		if (!method.allowedCountries.map((c) => c.toUpperCase()).includes(country)) {
 			return no("COUNTRY_NOT_ALLOWED")
 		}
 	}

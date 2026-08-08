@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
+import { DEFAULT_CLASSES, RATE_NAME } from "../../../domain/tax/defaultMatrix"
 import ApiError from "../../errors/ApiError"
 
 const include = { translations: true, rates: { orderBy: { priority: "asc" } } } satisfies Prisma.TaxClassInclude
@@ -75,6 +76,47 @@ const assertNoClash = async (where: {
 			priority: String(where.priority),
 		},
 	})
+}
+
+/**
+ * Creates the documented tax matrix — but only into an empty table.
+ *
+ * A shop with no tax rows cannot take a single order: checkout refuses rather
+ * than invoicing at 0 % because nobody entered a rate. That is the correct
+ * guard, and it is also a shop that does not work out of the box.
+ *
+ * The `count() === 0` condition is what makes this safe. An empty tax table is
+ * not a decision anybody made; it is an unconfigured shop. The moment one class
+ * exists — even one somebody emptied on purpose — this never runs again and
+ * never touches a rate. Figures come from spec §3.7, not from here.
+ */
+const ensureDefaultMatrix = async (): Promise<number> => {
+	if ((await prisma.taxClass.count()) > 0) return 0
+
+	await prisma.$transaction(
+		DEFAULT_CLASSES.map((definition) =>
+			prisma.taxClass.create({
+				data: {
+					code: definition.code,
+					isDefault: definition.isDefault,
+					sortOrder: definition.sortOrder,
+					translations: { create: definition.translations },
+					rates: {
+						create: definition.rates.map((rate) => ({
+							countryCode: rate.countryCode,
+							name: RATE_NAME,
+							rate: rate.rate,
+							appliesToShipping: rate.appliesToShipping,
+							priority: 1,
+							reverseChargeWithVatId: rate.reverseChargeWithVatId,
+						})),
+					},
+				},
+			})
+		)
+	)
+
+	return DEFAULT_CLASSES.length
 }
 
 const listClasses = async (locale: LocaleCode) => {
@@ -247,6 +289,7 @@ const removeRate = async (id: string) => {
 }
 
 export const TaxService = {
+	ensureDefaultMatrix,
 	listClasses,
 	getClass,
 	createClass,
