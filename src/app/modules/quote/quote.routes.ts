@@ -1,5 +1,5 @@
 import { Router } from "express"
-import { auth } from "../../middlewares/auth"
+import { auth, authAccount } from "../../middlewares/auth"
 import { optionalAuth } from "../../middlewares/optionalAuth"
 import { writeLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
@@ -34,8 +34,11 @@ QuoteRoutes.use("/", QuoteConvertRoutes)
 QuoteRoutes.get("/by-token", QuoteController.getByToken)
 
 // ── a signed-in customer's own threads ───────────────────────────────────────
-QuoteRoutes.get("/", auth(), QuoteController.listMine)
-QuoteRoutes.get("/:id", auth(), validateRequest(QuoteValidation.idSchema), QuoteController.getMine)
+// Readable while suspended — an open negotiation is theirs to see. Replying is
+// not: a message in a quote thread is part of agreeing a price, which is
+// exactly what suspension stops.
+QuoteRoutes.get("/", authAccount(), QuoteController.listMine)
+QuoteRoutes.get("/:id", authAccount(), validateRequest(QuoteValidation.idSchema), QuoteController.getMine)
 QuoteRoutes.post(
 	"/:id/messages",
 	auth(),

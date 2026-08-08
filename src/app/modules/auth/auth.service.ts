@@ -147,15 +147,34 @@ const login = async (
 
 	if (!(await bcrypt.compare(payload.password, user.passwordHash))) throw invalid
 
+	/*
+	 * A deleted account answers exactly like an unknown one.
+	 *
+	 * Staff can restore it, so the row is still here and the address is still
+	 * taken — but saying so would turn deletion into a way to confirm that
+	 * somebody was once a customer. The person holding this password has no
+	 * account as far as this endpoint is concerned.
+	 */
+	if (user.deletedAt) throw invalid
+
 	if (user.status === "REJECTED") {
 		throw new ApiError(httpStatus.FORBIDDEN, "This account has been rejected", {
 			messageKey: "auth.rejected",
 		})
 	}
 
-	// PENDING accounts may sign in — they need to see their application status —
-	// but the auth() guard keeps them out of protected routes, and R5b prices
-	// them as a guest.
+	// Prepared by staff, not handed over yet. There is nothing behind this
+	// password to sign in to, and the applicant has not been told it exists.
+	if (user.status === "DRAFT") {
+		throw new ApiError(httpStatus.FORBIDDEN, "This account is not active yet", {
+			messageKey: "auth.draft",
+		})
+	}
+
+	// PENDING and SUSPENDED accounts may sign in. PENDING needs to see its
+	// application status; SUSPENDED needs its own invoices and the chance to
+	// correct its details. Neither can trade — the auth() guard keeps them off
+	// the trading routes and R5b prices them as guests.
 	await prisma.user.update({
 		where: { id: user.id },
 		data: { lastLoginAt: new Date() },
@@ -176,7 +195,20 @@ const refresh = async (token: string, device: DeviceInfo): Promise<AuthResult> =
 	})
 
 	if (!stored || stored.revokedAt || stored.expiresAt < new Date()) throw invalid
-	if (stored.user.status === "REJECTED") throw invalid
+
+	/*
+	 * The status is re-read here, and this is the moment a staff decision
+	 * actually bites.
+	 *
+	 * An access token carries the status it was minted with, so suspending
+	 * someone does not reach into a token already in the wild. Refusing the
+	 * refresh — together with revoking their stored tokens at the moment of the
+	 * decision — closes the session as soon as the current access token runs
+	 * out. The gap is one access-token lifetime, which is the price of not
+	 * querying the database on every single request.
+	 */
+	if (stored.user.deletedAt) throw invalid
+	if (stored.user.status === "REJECTED" || stored.user.status === "DRAFT") throw invalid
 
 	await prisma.refreshToken.update({
 		where: { id: stored.id },

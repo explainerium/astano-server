@@ -1,5 +1,5 @@
 import { Router } from "express"
-import { auth } from "../../middlewares/auth"
+import { auth, authAccount } from "../../middlewares/auth"
 import { writeLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { InvoiceController } from "../invoice/invoice.controller"
@@ -23,10 +23,16 @@ CheckoutRoutes.post(
 
 CheckoutRoutes.post("/", writeLimiter, validateRequest(OrderValidation.placeOrderSchema), OrderController.place)
 
-/** A customer's own order history. */
+/**
+ * A customer's own order history.
+ *
+ * `authAccount`, so a suspended customer can still reach what they have already
+ * bought and paid for. Checkout above stays on `auth` — reading the past is not
+ * the same permission as committing to something new.
+ */
 export const OrderRoutes = Router()
 
-OrderRoutes.use(auth())
+OrderRoutes.use(authAccount())
 
 OrderRoutes.get("/", OrderController.listMine)
 OrderRoutes.get("/:id", validateRequest(OrderValidation.idSchema), OrderController.getMine)

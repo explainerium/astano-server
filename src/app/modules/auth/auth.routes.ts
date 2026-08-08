@@ -1,6 +1,6 @@
 import { Router } from "express"
 import rateLimit from "express-rate-limit"
-import { auth } from "../../middlewares/auth"
+import { auth, authAccount } from "../../middlewares/auth"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { AuthController } from "./auth.controller"
 import { AuthValidation } from "./auth.validation"
@@ -42,7 +42,9 @@ router.post("/refresh", validateRequest(AuthValidation.refreshSchema), AuthContr
 
 router.post("/logout", AuthController.logout)
 
-router.get("/me", auth(), AuthController.me)
+// authAccount: a suspended customer has to be able to load their own session,
+// or the app cannot even tell them why they are suspended.
+router.get("/me", authAccount(), AuthController.me)
 
 router.post(
 	"/forgot-password",

@@ -13,6 +13,44 @@ const updateProfile: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+const requestEmailChange: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("account.emailChangeRequested", req.locale),
+		data: await AccountService.requestEmailChange(
+			req.user!.sub,
+			req.body.email,
+			req.body.currentPassword
+		),
+	})
+})
+
+const pendingEmailChange: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await AccountService.pendingEmailChange(req.user!.sub),
+	})
+})
+
+const cancelEmailChange: RequestHandler = catchAsync(async (req, res) => {
+	await AccountService.cancelEmailChange(req.user!.sub)
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("account.emailChangeCancelled", req.locale),
+		data: null,
+	})
+})
+
+/** Public — the token is the authorisation. See AccountService.verifyEmailChange. */
+const verifyEmailChange: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("account.emailChanged", req.locale),
+		data: await AccountService.verifyEmailChange(req.body.token),
+	})
+})
+
 const listAddresses: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
@@ -52,6 +90,10 @@ const removeAddress: RequestHandler = catchAsync(async (req, res) => {
 
 export const AccountController = {
 	updateProfile,
+	requestEmailChange,
+	pendingEmailChange,
+	cancelEmailChange,
+	verifyEmailChange,
 	listAddresses,
 	getAddress,
 	createAddress,

@@ -21,10 +21,36 @@ enum UserRole {
 /// Separate from role. Every B2B registration is manually approved
 /// (`_settings_user_status_option = admin_approve`), so a RESELLER can exist
 /// as PENDING. Auth guards must always check both.
+///
+/// Only ACTIVE may trade. effectiveRole() prices everything else as a guest, so
+/// adding a state here can never accidentally hand out wholesale rates.
 enum UserStatus {
   ACTIVE
+
+  /// Registered, waiting on a staff decision. A RESELLER sits here until their
+  /// application is approved.
   PENDING
+
+  /// Application declined.
   REJECTED
+
+  /// Partially blocked, by staff decision.
+  ///
+  /// The account still works as an account: they can sign in, read their
+  /// history and correct their own details. What stops is trading — no cart,
+  /// no checkout, no quote request — and a dealer here pays guest prices.
+  /// Suspension is a commercial measure (a payment dispute, an abuse
+  /// investigation), not a lockout, so it must not strand somebody outside
+  /// their own invoices.
+  SUSPENDED
+
+  /// Prepared by staff, not yet live.
+  ///
+  /// For accounts an admin keys in before the customer exists to them — a
+  /// dealer who phoned, a record migrated from the old shop. The row is real
+  /// and editable but sign-in is refused until it is activated. The product
+  /// catalogue's DRAFT means the same thing.
+  DRAFT
 }
 
 model User {
@@ -77,6 +103,21 @@ model User {
 
   lastLoginAt DateTime?
 
+  /// Set when staff delete the account without destroying it.
+  ///
+  /// A row, not a status, because deletion is orthogonal to everything else:
+  /// restoring has to put the account back exactly as it was, and folding it
+  /// into UserStatus would lose whatever state it held. Orders reference users
+  /// with SetNull, so a hard delete really does erase the customer from the
+  /// sales record — that is precisely why the reversible option exists and why
+  /// it is the one the UI offers first.
+  ///
+  /// Deleted accounts are excluded from every staff list and refused sign-in.
+  /// The email stays on the row and stays unique, so the address cannot be
+  /// re-registered while a recoverable account holds it.
+  deletedAt DateTime?
+  deletedBy String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -89,6 +130,7 @@ model User {
   wishlist            Wishlist?
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
+  emailChangeTokens   EmailChangeToken[]
 
   /// Products this staff account created. See Product.createdBy.
   productsCreated Product[] @relation("ProductAuthor")
@@ -97,7 +139,38 @@ model User {
   priceTiers CustomerPriceTier[]
 
   @@index([role, status])
+  @@index([deletedAt])
   @@map("users")
+}
+
+/// A requested email address, held until the owner of that address proves they
+/// can read it.
+///
+/// The new address lives here and **not** on the User until the link is used.
+/// Storing it on the row with a "pending" flag would mean one careless query
+/// away from emailing invoices to an address nobody has confirmed — or from
+/// letting somebody claim an address they mistyped and lock themselves out.
+///
+/// Hashed like every other token: the link in the mailbox is the secret, the
+/// database only holds its fingerprint.
+model EmailChangeToken {
+  id String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Already lowercased and trimmed by validation, so the uniqueness check at
+  /// verification time compares like with like.
+  newEmail String
+
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("email_change_tokens")
 }
 
 /// Refresh tokens are stored hashed, never in plaintext — a leaked database
