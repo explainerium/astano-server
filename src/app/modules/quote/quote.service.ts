@@ -2,6 +2,8 @@ import Decimal from "decimal.js"
 import type { Prisma, QuoteStatus } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { applyMoqFloor, getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
+import { t } from "../../../i18n"
+import { notifyStaff, sendQuoteAnswered, sendQuoteSubmitted } from "../../../helpers/mailer"
 import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
@@ -449,9 +451,35 @@ const submit = async (
 	})
 
 	const full = await prisma.quoteRequest.findUnique({ where: { id: created.id }, include: quoteInclude })
+	const view = quoteView(full!)
 
-	// TODO(email): send the confirmation carrying `accessToken` for guests.
-	return { quote: quoteView(full!), accessToken }
+	/*
+	 * Both mails are fire-and-forget against a request that is already stored.
+	 * The guest's copy carries the raw access token, which exists nowhere else —
+	 * it is hashed in the database — so this is the only chance to send it.
+	 */
+	await sendQuoteSubmitted({
+		to: full!.contactEmail,
+		locale: full!.locale as LocaleCode,
+		quoteNumber: view.quoteNumber,
+		contactName: full!.contactName,
+		title: full!.title,
+		items: view.items.map((i) => ({ name: i.name, quantity: i.quantity })),
+		accessToken,
+	})
+
+	await notifyStaff({
+		kind: "staff-new-quote",
+		locale: full!.locale as LocaleCode,
+		subject: t("staff.newQuote.subject", full!.locale as LocaleCode, { number: view.quoteNumber }),
+		title: t("staff.newQuote.title", full!.locale as LocaleCode, { number: view.quoteNumber }),
+		intro: t("staff.newQuote.intro", full!.locale as LocaleCode, {
+			name: full!.contactName,
+			title: full!.title,
+		}),
+	})
+
+	return { quote: view, accessToken }
 }
 
 // ── reads and replies ────────────────────────────────────────────────────────
@@ -529,7 +557,43 @@ const reply = async (
 		}
 	})
 
+	/*
+	 * Only a visible staff reply is an answer. An internal note must never mail
+	 * the customer — that is the whole point of the flag, and getting it wrong
+	 * sends them a colleague's private remark.
+	 */
+	const answered = author === "STAFF" && !isInternal
+
+	/*
+	 * A guest has no account to sign into, so the answer has to carry its own
+	 * way back to the thread — and the token from the original email cannot be
+	 * reused, because only its hash was kept.
+	 *
+	 * So it rotates: a fresh token each time staff answer. The link in the
+	 * newest email is always the live one and older links stop working, which is
+	 * the better failure of the two available.
+	 */
+	const rotated = answered && quote.accessTokenHash ? generateToken() : null
+
+	if (rotated) {
+		await prisma.quoteRequest.update({
+			where: { id },
+			data: { accessTokenHash: hashToken(rotated) },
+		})
+	}
+
 	const full = await prisma.quoteRequest.findUnique({ where: { id }, include: quoteInclude })
+
+	if (answered) {
+		await sendQuoteAnswered({
+			to: full!.contactEmail,
+			locale: full!.locale as LocaleCode,
+			quoteNumber: formatNumber(full!.number),
+			contactName: full!.contactName,
+			accessToken: rotated,
+		})
+	}
+
 	return quoteView(full!, { staff: author === "STAFF" })
 }
 

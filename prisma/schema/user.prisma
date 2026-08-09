@@ -125,6 +125,7 @@ model User {
   b2bApplication      B2bApplication?
   carts               Cart[]
   orders              Order[]
+  orderNotes          OrderNote[]
   quoteBaskets        QuoteBasket[]
   quoteRequests       QuoteRequest[]
   wishlist            Wishlist?

@@ -61,4 +61,16 @@ AdminOrderRoutes.patch(
 	OrderController.updateStatus
 )
 
+AdminOrderRoutes.get(
+	"/:id/notes",
+	validateRequest(OrderValidation.idSchema),
+	OrderController.listNotes
+)
+
+AdminOrderRoutes.post(
+	"/:id/notes",
+	validateRequest(OrderValidation.addNoteSchema),
+	OrderController.addNote
+)
+
 export default OrderRoutes

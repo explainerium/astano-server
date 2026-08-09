@@ -7,6 +7,14 @@ import {
 	type RolePriceInput,
 } from "../../../domain/pricing/resolvePrice"
 import { getEffectiveMoq } from "../../../domain/moq/getEffectiveMoq"
+import {
+	availableOf,
+	DEFAULT_STOCK_RULES,
+	isInStock,
+	readStockRules,
+	type StockRules,
+} from "../../../domain/stock/availability"
+import { SettingService } from "../setting/setting.service"
 import { storage } from "../../../helpers/storage"
 import { copyNameFor } from "../../../shared/duplicate"
 import { loadExternalTiers, type ExternalTiers } from "./tierSources"
@@ -124,7 +132,9 @@ const toPublicProduct = (
 	 * a category ladder here is measured against the quantity being previewed —
 	 * the cart is where it meets the real total.
 	 */
-	external: ExternalTiers = {}
+	external: ExternalTiers = {},
+	/** Shop-wide stock floor. Defaults to the behaviour from before it was settable. */
+	stockRules: StockRules = DEFAULT_STOCK_RULES
 ) => {
 	const t = pickTranslation(row.translations, locale)
 	const productPrices = toPriceInputs(row.prices, row.priceTiers)
@@ -231,8 +241,10 @@ const toPublicProduct = (
 					isDefault: v.isDefault,
 					description: vt?.description ?? null,
 					moq: getEffectiveMoq({ productMoq: row.moq, variantMoq: v.moq }),
-					inStock: !v.manageStock || v.stock > 0 || v.allowBackorder,
-					stock: v.manageStock ? v.stock : null,
+					inStock: isInStock(v, stockRules),
+					// What the customer may actually order, which is the stock on hand
+					// less whatever floor the shop holds back — not the raw count.
+					stock: availableOf(v, stockRules),
 					weightKg: v.weightKg?.toString() ?? null,
 					// The three dimensions the "Additional information" tab prints
 					// alongside the weight, exactly as WooCommerce does. Null where
@@ -520,14 +532,17 @@ const list = async (params: {
 		...(byPrice ? {} : { skip: (params.page - 1) * params.limit, take: params.limit }),
 	})
 
-	const externalTiers = await loadExternalTiers({
-		productIds: rows.map((r) => r.id),
-		role: params.role,
-		userId: params.userId,
-	})
+	const [externalTiers, stockRules] = await Promise.all([
+		loadExternalTiers({
+			productIds: rows.map((r) => r.id),
+			role: params.role,
+			userId: params.userId,
+		}),
+		SettingService.getMap().then(readStockRules),
+	])
 
 	const priced = rows.map((r) =>
-		toPublicProduct(r, params.locale, params.role, params.quantity, externalTiers(r.id))
+		toPublicProduct(r, params.locale, params.role, params.quantity, externalTiers(r.id), stockRules)
 	)
 
 	if (!byPrice) {
@@ -611,13 +626,12 @@ const getBySlug = async (
 		})
 	}
 
-	const externalTiers = await loadExternalTiers({
-		productIds: [row.id],
-		role,
-		userId,
-	})
+	const [externalTiers, stockRules] = await Promise.all([
+		loadExternalTiers({ productIds: [row.id], role, userId }),
+		SettingService.getMap().then(readStockRules),
+	])
 
-	return toPublicProduct(row, locale, role, quantity, externalTiers(row.id))
+	return toPublicProduct(row, locale, role, quantity, externalTiers(row.id), stockRules)
 }
 
 /**
@@ -630,20 +644,25 @@ const getBySlug = async (
  *                 `every` rather than `some`, because a product with one sold-out
  *                 variant and one in stock is still in stock.
  */
-const stockWhere = (status: string): Prisma.ProductWhereInput => {
+const stockWhere = (status: string, rules: StockRules): Prisma.ProductWhereInput => {
+	// The same floor the product view and the purchase guards apply, expressed
+	// as SQL. Filtering on a different number from the one the page displays is
+	// how a listing ends up disagreeing with the product it links to.
+	const floor = rules.outOfStockThreshold
+
 	switch (status) {
 		case "IN_STOCK":
-			return { variants: { some: { OR: [{ manageStock: false }, { stock: { gt: 0 } }] } } }
+			return { variants: { some: { OR: [{ manageStock: false }, { stock: { gt: floor } }] } } }
 		case "ON_BACKORDER":
 			return {
 				variants: {
-					some: { manageStock: true, stock: { lte: 0 }, allowBackorder: true },
+					some: { manageStock: true, stock: { lte: floor }, allowBackorder: true },
 				},
 			}
 		case "OUT_OF_STOCK":
 			return {
 				variants: {
-					every: { manageStock: true, stock: { lte: 0 }, allowBackorder: false },
+					every: { manageStock: true, stock: { lte: floor }, allowBackorder: false },
 				},
 			}
 		default:
@@ -662,6 +681,10 @@ const adminList = async (params: {
 	page: number
 	limit: number
 }) => {
+	const stockRules = params.stockStatus
+		? readStockRules(await SettingService.getMap())
+		: DEFAULT_STOCK_RULES
+
 	const where: Prisma.ProductWhereInput = {
 		...(params.kind ? { kind: params.kind as "MAIN" | "OPTION" } : {}),
 		...(params.status ? { status: params.status as "DRAFT" | "PUBLISHED" | "ARCHIVED" } : {}),
@@ -671,7 +694,7 @@ const adminList = async (params: {
 		// By id, not slug: the admin already holds ids, and a slug differs per
 		// language while an id does not.
 		...(params.categoryId ? { categories: { some: { categoryId: params.categoryId } } } : {}),
-		...(params.stockStatus ? stockWhere(params.stockStatus) : {}),
+		...(params.stockStatus ? stockWhere(params.stockStatus, stockRules) : {}),
 		...(params.search
 			? {
 					OR: [

@@ -56,6 +56,18 @@ export const listOrdersSchema = z.object({
 
 export const idSchema = z.object({ params: z.object({ id: z.string().uuid() }) })
 
+export const addNoteSchema = z.object({
+	params: z.object({ id: z.string().uuid() }),
+	body: z.object({
+		body: z.string().trim().min(1, "Write something").max(4000),
+		/**
+		 * Defaults to private. A note that emails the customer by accident cannot
+		 * be recalled, so the safe value is the one you get by not choosing.
+		 */
+		isCustomerVisible: z.boolean().default(false),
+	}),
+})
+
 export const updateStatusSchema = z.object({
 	params: z.object({ id: z.string().uuid() }),
 	body: z.object({
@@ -81,4 +93,5 @@ export const OrderValidation = {
 	listOrdersSchema,
 	idSchema,
 	updateStatusSchema,
+	addNoteSchema,
 }

@@ -3,7 +3,10 @@ import { Prisma, type OrderStatus, type PaymentStatus } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
 import { readBankAccounts } from "../../../domain/payment/bankAccounts"
+import { SettingService } from "../setting/setting.service"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
+import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
+import { availableOf, canTake, isLow, readStockRules } from "../../../domain/stock/availability"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
 import { resolveShipping } from "../../../domain/shipping/resolveShipping"
@@ -13,7 +16,12 @@ import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
 import { applyBundleDiscount, loadBundleDiscounts } from "../cart/bundleDiscount"
 import { loadExternalTiers } from "../product/tierSources"
-import { notifyStaff, sendOrderConfirmation, sendOrderStatusChanged } from "../../../helpers/mailer"
+import {
+	notifyStaff,
+	sendCustomerNote,
+	sendOrderConfirmation,
+	sendOrderStatusChanged,
+} from "../../../helpers/mailer"
 import { t } from "../../../i18n"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -195,6 +203,10 @@ const quoteCart = async (params: QuoteParams) => {
 
 	const role = effectiveRole((params.role ?? null) as never, (params.status ?? null) as never)
 
+	// The same floor the cart and the product page applied, for the same reason
+	// the prices below are re-resolved rather than trusted.
+	const stockRules = readStockRules(await SettingService.getMap())
+
 	// The same discounts the cart applied. Without this the basket would show
 	// one total and the invoice another.
 	const bundleDiscounts = await loadBundleDiscounts(cart.items)
@@ -264,14 +276,10 @@ const quoteCart = async (params: QuoteParams) => {
 			})
 		}
 
-		if (
-			item.variant.manageStock &&
-			!item.variant.allowBackorder &&
-			item.quantity > item.variant.stock
-		) {
+		if (!canTake(item.variant, item.quantity, stockRules)) {
 			throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
 				messageKey: "order.lineOutOfStock",
-				messageVars: { sku: label, available: String(item.variant.stock) },
+				messageVars: { sku: label, available: String(availableOf(item.variant, stockRules) ?? 0) },
 			})
 		}
 
@@ -399,7 +407,20 @@ const quoteCart = async (params: QuoteParams) => {
 		? await prisma.user.findUnique({ where: { id: params.userId } })
 		: null
 
-	const tax = resolveTax({
+	/*
+	 * The master switch, and what "off" has to mean.
+	 *
+	 * Explicitly **not** `unconfigured`. That state exists to refuse an order
+	 * rather than invoice it at 0 % because nobody entered a rate — an accident.
+	 * A shop that has deliberately turned tax off has not had an accident, so
+	 * checkout must proceed. Routing this through resolveTax with no country
+	 * would produce the refusing state instead, which is why it is spelt out.
+	 */
+	const taxEnabled = (await SettingService.read<boolean>("tax.enabled")) !== false
+
+	const tax = !taxEnabled
+		? { lines: [], totalTax: "0.00", reverseCharged: false, unconfigured: false }
+		: resolveTax({
 		countryCode: params.shippingCountry ?? null,
 		state: params.shippingState ?? null,
 		netAmount: subtotal,
@@ -470,6 +491,7 @@ const quoteCart = async (params: QuoteParams) => {
 		eligibility,
 		methodsById,
 		user,
+		stockRules,
 	}
 }
 
@@ -539,7 +561,26 @@ const place = async (
 ) => {
 	const shippingAddress = params.shippingAddress ?? params.billingAddress
 
+	/*
+	 * Checked here, not only in the country dropdown.
+	 *
+	 * The checkout filters its list with the same rule, so this should never
+	 * fire for anyone using the site normally. It fires for a request that did
+	 * not come from the site — and a selling restriction the server does not
+	 * enforce is a preference, not a rule.
+	 */
+	const selling = readSellingRule(await SettingService.getMap())
+
+	if (!canSellTo(selling, shippingAddress.countryCode)) {
+		throw new ApiError(httpStatus.CONFLICT, "We do not sell to that country", {
+			messageKey: "order.countryNotSold",
+		})
+	}
+
 	const q = await quoteCart({ ...params, shippingCountry: shippingAddress.countryCode, shippingState: shippingAddress.state })
+
+	/** Filled as stock is decremented, mailed once the order has committed. */
+	const lowStock: { sku: string | null; remaining: number }[] = []
 
 	const verdict = q.eligibility.find((e) => e.methodId === params.paymentMethodId)
 	if (!verdict || !verdict.eligible) {
@@ -662,10 +703,16 @@ const place = async (
 		// simultaneous checkouts cannot both take the last item.
 		for (const line of q.lines) {
 			if (line.item.variant.manageStock) {
-				await tx.productVariant.update({
+				const after = await tx.productVariant.update({
 					where: { id: line.item.variantId },
 					data: { stock: { decrement: line.item.quantity } },
+					select: { sku: true, stock: true, manageStock: true, allowBackorder: true, lowStockThreshold: true },
 				})
+
+				// Read the level back from the update rather than subtracting here:
+				// under two simultaneous checkouts the returned row is the real one,
+				// and a guess would warn on the wrong order or not at all.
+				if (isLow(after, q.stockRules)) lowStock.push({ sku: after.sku, remaining: after.stock })
 			}
 		}
 
@@ -699,6 +746,7 @@ const place = async (
 	}
 
 	await notifyStaff({
+		kind: "staff-new-order",
 		locale: params.locale,
 		subject: t("staff.newOrder.subject", params.locale, { number: result.orderNumber }),
 		title: t("staff.newOrder.title", params.locale, { number: result.orderNumber }),
@@ -707,6 +755,27 @@ const place = async (
 			total: `${result.grandTotal} ${result.currency}`,
 		}),
 	})
+
+	/*
+	 * Separate mail from the order notification, and only when something
+	 * actually crossed its mark. Folding it into the order email would put a
+	 * restocking job in a message read for a different reason, and send it on
+	 * every order rather than the few that need it.
+	 */
+	if (lowStock.length) {
+		const skus = lowStock.map((l) => l.sku ?? "—").join(", ")
+
+		await notifyStaff({
+			kind: "staff-low-stock",
+			locale: params.locale,
+			subject: t("staff.lowStock.subject", params.locale, { skus }),
+			title: t("staff.lowStock.title", params.locale),
+			intro: t("staff.lowStock.intro", params.locale, {
+				number: result.orderNumber,
+				lines: lowStock.map((l) => `${l.sku ?? "—"} (${l.remaining})`).join(", "),
+			}),
+		})
+	}
 
 	return result
 }
@@ -857,9 +926,68 @@ const updateStatus = async (
 	return adminGet(id)
 }
 
+/**
+ * Adds a note to an order, and emails it if it is meant for the customer.
+ *
+ * The author's name is copied onto the row rather than joined at read time.
+ * Staff accounts get deleted, and "note added by (nobody)" is worse than a name
+ * that is now historical — the point of a thread is knowing who said it.
+ */
+const addNote = async (
+	orderId: string,
+	payload: { body: string; isCustomerVisible: boolean },
+	staffUserId: string
+) => {
+	const [order, staff] = await Promise.all([
+		prisma.order.findUnique({
+			where: { id: orderId },
+			include: { addresses: true, user: true },
+		}),
+		prisma.user.findUnique({ where: { id: staffUserId } }),
+	])
+
+	if (!order) {
+		throw new ApiError(httpStatus.NOT_FOUND, "Order not found", { messageKey: "order.notFound" })
+	}
+
+	const note = await prisma.orderNote.create({
+		data: {
+			orderId,
+			authorId: staffUserId,
+			authorName: [staff?.firstName, staff?.lastName].filter(Boolean).join(" ") || "Staff",
+			body: payload.body,
+			isCustomerVisible: payload.isCustomerVisible,
+		},
+	})
+
+	if (payload.isCustomerVisible) {
+		const billing = order.addresses.find((a) => a.type === "BILLING")
+		const to = billing?.email ?? order.user?.email
+
+		// Stored first, mailed second. A note that exists but did not send is
+		// recoverable; one that sent but was never recorded is not.
+		if (to) {
+			await sendCustomerNote({
+				to,
+				locale: (order.locale || "en") as LocaleCode,
+				orderNumber: formatNumber(order.number),
+				customerName: billing?.firstName ?? "",
+				note: payload.body,
+			})
+		}
+	}
+
+	return note
+}
+
+const listNotes = async (orderId: string) =>
+	prisma.orderNote.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } })
+
 export const OrderService = {
 	preview,
 	place,
+	addNote,
+	listNotes,
 	listMine,
 	getMine,
 	adminList,

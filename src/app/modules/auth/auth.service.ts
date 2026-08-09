@@ -7,7 +7,8 @@ import { logger } from "../../../shared/logger"
 import { prisma } from "../../../shared/prisma"
 import { durationToMs, generateToken, hashToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
-import { sendPasswordReset } from "../../../helpers/mailer"
+import type { LocaleCode } from "../../../config/locales"
+import { sendAccountWelcome, sendPasswordReset } from "../../../helpers/mailer"
 import { BCRYPT_ROUNDS, RESET_TOKEN_TTL } from "./auth.constant"
 import { type AuthResult, type PublicUser, toPublicUser } from "./auth.interface"
 
@@ -121,6 +122,15 @@ const register = async (
 		})
 
 		return created
+	})
+
+	// After the account exists, not inside the transaction: a slow mail server
+	// must not hold a database connection, and a registration that succeeded is
+	// not undone by a welcome that did not arrive.
+	await sendAccountWelcome({
+		to: user.email,
+		locale: (user.locale || "en") as LocaleCode,
+		name: user.firstName ?? "",
 	})
 
 	return issueTokens(user, device)

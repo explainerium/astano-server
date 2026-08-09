@@ -136,6 +136,7 @@ const apply = async (payload: any, locale: LocaleCode) => {
 	})
 
 	await notifyStaff({
+		kind: "staff-b2b-application",
 		locale,
 		subject: t("staff.newDealer.subject", locale, { company: payload.companyName }),
 		title: t("staff.newDealer.title", locale),

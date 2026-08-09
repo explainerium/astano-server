@@ -12,17 +12,25 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 		message: t("common.ok", req.locale),
 		data: {
 			settings: await SettingService.getAll(),
-			known: SettingService.KNOWN_SETTINGS,
+			// The registry, so the screen renders each setting as the control it
+			// deserves instead of a text box holding "true".
+			definitions: SettingService.SETTINGS,
+			groups: SettingService.SETTING_GROUPS,
 		},
 	})
 })
 
-/** Only the ones flagged public — shop name, support address. */
+/**
+ * What the storefront needs before it can render a price.
+ *
+ * Resolved with fallbacks rather than returning only what happens to be stored
+ * — a shop nobody has configured must still format money, not print NaN.
+ */
 const listPublic: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
 		message: t("common.ok", req.locale),
-		data: await SettingService.getAll({ publicOnly: true }),
+		data: await SettingService.getPublic(),
 	})
 })
 

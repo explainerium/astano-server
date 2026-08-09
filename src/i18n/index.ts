@@ -30,9 +30,21 @@ export const t = (
 	key: string,
 	locale: LocaleCode = DEFAULT_LOCALE,
 	vars?: Record<string, string | number>
-): string => {
-	const message = catalogs[locale]?.[key] ?? catalogs[DEFAULT_LOCALE]?.[key] ?? key
+): string => interpolate(catalogs[locale]?.[key] ?? catalogs[DEFAULT_LOCALE]?.[key] ?? key, vars)
 
+/**
+ * Fills {name} placeholders in a string that is not a catalog key.
+ *
+ * Admin-written email subjects go through the same substitution as the built-in
+ * ones, so "Your order {number} has shipped" behaves the way anyone would
+ * expect from looking at the default it replaced. An unknown placeholder is
+ * left as written rather than blanked — a visible `{ordernumber}` is a typo the
+ * admin can see and fix, an empty gap is one they cannot.
+ */
+export const interpolate = (
+	message: string,
+	vars?: Record<string, string | number>
+): string => {
 	if (!vars) return message
 
 	return message.replace(/\{(\w+)\}/g, (match, name: string) =>

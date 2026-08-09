@@ -2,6 +2,8 @@ import type { Prisma } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
+import { DEFAULT_STOCK_RULES, isInStock, readStockRules, type StockRules } from "../../../domain/stock/availability"
+import { SettingService } from "../setting/setting.service"
 import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
@@ -50,7 +52,12 @@ const toPriceInputs = (
 			})),
 	}))
 
-const view = (row: Row, locale: LocaleCode, role: PricingRole) => ({
+const view = (
+	row: Row,
+	locale: LocaleCode,
+	role: PricingRole,
+	stockRules: StockRules = DEFAULT_STOCK_RULES
+) => ({
 	id: row.id,
 	itemCount: row.items.length,
 	items: row.items.map((i) => {
@@ -78,7 +85,7 @@ const view = (row: Row, locale: LocaleCode, role: PricingRole) => ({
 			image: image ? { id: image.id, url: storage.publicUrl(image.storageKey) } : null,
 			quoteOnly: product.quoteEnabled,
 			moq: product.moq,
-			inStock: !i.variant.manageStock || i.variant.stock > 0 || i.variant.allowBackorder,
+			inStock: isInStock(i.variant, stockRules),
 			/// False once a product is unpublished or a variant disabled — the
 			/// entry stays visible so the customer knows why it cannot be bought.
 			available: i.variant.isActive && product.status === "PUBLISHED",
@@ -157,12 +164,15 @@ const roleOf = (o: Owner): PricingRole =>
 
 const reload = async (id: string, locale: LocaleCode, role: PricingRole) => {
 	const fresh = await prisma.wishlist.findUnique({ where: { id }, include })
-	return view(fresh!, locale, role)
+	return view(fresh!, locale, role, readStockRules(await SettingService.getMap()))
 }
 
 const get = async (owner: Owner, locale: LocaleCode) => {
 	const { list, token } = await resolveList(owner)
-	return { list: view(list, locale, roleOf(owner)), token }
+	return {
+		list: view(list, locale, roleOf(owner), readStockRules(await SettingService.getMap())),
+		token,
+	}
 }
 
 const add = async (owner: Owner, variantId: string, locale: LocaleCode) => {

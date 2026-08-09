@@ -69,6 +69,7 @@ ContactRoutes.post(
 		// Stored first, then emailed. If mail fails the enquiry still exists —
 		// losing a potential customer to an SMTP hiccup is not acceptable.
 		await notifyStaff({
+			kind: "staff-new-contact",
 			locale: req.locale,
 			subject: t("staff.newContact.subject", req.locale, {
 				subject: req.body.subject || req.body.name,

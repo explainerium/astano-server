@@ -7,6 +7,8 @@ import {
 } from "../../../domain/bundle/priceBundle"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import type { RolePriceInput } from "../../../domain/pricing/resolvePrice"
+import { availableOf, canTake, readStockRules } from "../../../domain/stock/availability"
+import { SettingService } from "../setting/setting.service"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
@@ -222,6 +224,8 @@ const addToCart = async (
 	}
 
 	// Stock, checked across the whole configuration before anything is written.
+	const stockRules = readStockRules(await SettingService.getMap())
+
 	for (const line of [
 		{ variantId: main.id, quantity: payload.quantity, v: main },
 		...optionLines.map((o) => ({
@@ -232,10 +236,10 @@ const addToCart = async (
 	]) {
 		const variant =
 			line.v ?? (await prisma.productVariant.findUnique({ where: { id: line.variantId } }))
-		if (variant?.manageStock && !variant.allowBackorder && line.quantity > variant.stock) {
+		if (variant && !canTake(variant, line.quantity, stockRules)) {
 			throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
 				messageKey: "cart.insufficientStock",
-				messageVars: { available: String(variant.stock) },
+				messageVars: { available: String(availableOf(variant, stockRules) ?? 0) },
 			})
 		}
 	}

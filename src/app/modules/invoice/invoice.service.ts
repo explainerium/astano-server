@@ -104,7 +104,7 @@ const renderAddress = (a: InvoiceOrder["addresses"][number] | undefined): string
 
 const renderHtml = (order: InvoiceOrder, company: CompanyDetails, locale: LocaleCode): string => {
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, locale, vars)
-	const invoiceNumber = `AST-${String(order.number).padStart(6, "0")}`
+	const invoiceNumber = `${company.invoiceNumberPrefix}${String(order.number).padStart(6, "0")}`
 	const billing = order.addresses.find((a) => a.type === "BILLING")
 	const shipping = order.addresses.find((a) => a.type === "SHIPPING")
 
@@ -288,7 +288,7 @@ const generate = async (orderId: string): Promise<{ pdf: Buffer; filename: strin
 
 		return {
 			pdf: Buffer.from(pdf),
-			filename: `invoice-AST-${String(order.number).padStart(6, "0")}.pdf`,
+			filename: `invoice-${company.invoiceNumberPrefix}${String(order.number).padStart(6, "0")}.pdf`,
 		}
 	} catch (error) {
 		logger.error({ err: error, orderId }, "invoice generation failed")

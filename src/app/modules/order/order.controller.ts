@@ -106,9 +106,27 @@ const updateStatus: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+const listNotes: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await OrderService.listNotes(req.params.id as string),
+	})
+})
+
+const addNote: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.CREATED,
+		message: t(req.body.isCustomerVisible ? "order.noteSent" : "order.noteAdded", req.locale),
+		data: await OrderService.addNote(req.params.id as string, req.body, req.user!.sub),
+	})
+})
+
 export const OrderController = {
 	preview,
 	place,
+	listNotes,
+	addNote,
 	listMine,
 	getMine,
 	adminList,

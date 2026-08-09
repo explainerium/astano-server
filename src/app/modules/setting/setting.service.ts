@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client"
 import { prisma } from "../../../shared/prisma"
+import { PUBLIC_KEYS, SETTINGS, SETTING_GROUPS } from "./settingRegistry"
 
 /**
  * Store settings.
@@ -11,33 +12,6 @@ import { prisma } from "../../../shared/prisma"
  * codebase reads, so a missing one degrades to a sensible blank rather than
  * crashing an invoice.
  */
-export const KNOWN_SETTINGS = {
-	"company.name": "Legal entity on invoices",
-	"company.street": "Street address",
-	"company.postcode": "Postcode",
-	"company.city": "City",
-	"company.countryCode": "ISO country code",
-	"company.vatId": "VAT identification number",
-	"company.registerNumber": "Commercial register number",
-	"company.email": "Contact address shown to customers",
-	"company.phone": "Contact phone",
-	"company.website": "Shop URL",
-	"invoice.footer": "Free text printed at the foot of every invoice",
-	"invoice.numberPrefix": "Prefix for invoice numbers",
-	"mail.fromName": "Display name on outgoing email",
-	"mail.fromAddress": "From address on outgoing email",
-	"mail.adminNotifyAddress": "Where new orders and quote requests are announced",
-	/**
-	 * Which quantity ladder wins when more than one could apply.
-	 *
-	 * Comma-separated, most specific first. Valid names are `customer`,
-	 * `catalogue` and `category`; anything else, or a list that does not name all
-	 * three exactly once, falls back to the default rather than silently dropping
-	 * a source.
-	 */
-	"pricing.tierPriority": "Order tier sources are tried in — customer,catalogue,category",
-} as const
-
 export interface CompanyDetails {
 	name: string
 	street: string
@@ -50,6 +24,7 @@ export interface CompanyDetails {
 	phone: string
 	website: string
 	invoiceFooter: string
+	invoiceNumberPrefix: string
 }
 
 const asString = (value: unknown): string =>
@@ -85,27 +60,40 @@ const getCompany = async (): Promise<CompanyDetails> => {
 		phone: asString(map["company.phone"]),
 		website: asString(map["company.website"]),
 		invoiceFooter: asString(map["invoice.footer"]),
+		// Applied when the PDF is rendered, not frozen onto the order. Changing it
+		// renumbers invoices that have already been sent, so it is a set-once
+		// setting in practice — same as WooCommerce.
+		invoiceNumberPrefix: asString(map["invoice.numberPrefix"] ?? SETTINGS["invoice.numberPrefix"]!.fallback),
 	}
 }
 
-/** Upserts many at once — the admin screen saves a whole form. */
+/**
+ * Upserts many at once — the admin screen saves a whole form.
+ *
+ * One multi-row statement rather than a row-per-upsert transaction. Prisma
+ * sends the array form of `$transaction` sequentially, so the cost was a round
+ * trip per key against a database two countries away; at ~200ms each the
+ * ten-field company form came within a second or so of the 5s transaction
+ * timeout, and a slower link tipped it over into a rollback that looked to the
+ * admin like the save had simply not happened. One statement is also atomic
+ * without needing a transaction at all.
+ */
 const setMany = async (entries: { key: string; value: unknown; isPublic?: boolean }[]) => {
-	await prisma.$transaction(
-		entries.map((e) =>
-			prisma.setting.upsert({
-				where: { key: e.key },
-				create: {
-					key: e.key,
-					value: (e.value ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-					isPublic: e.isPublic ?? false,
-				},
-				update: {
-					value: (e.value ?? Prisma.JsonNull) as Prisma.InputJsonValue,
-					...(e.isPublic !== undefined ? { isPublic: e.isPublic } : {}),
-				},
-			})
+	if (entries.length) {
+		const rows = entries.map(
+			(e) =>
+				Prisma.sql`(${e.key}, ${JSON.stringify(e.value ?? null)}::jsonb, ${e.isPublic ?? false}, now())`
 		)
-	)
+
+		await prisma.$executeRaw`
+			INSERT INTO settings ("key", "value", "isPublic", "updatedAt")
+			VALUES ${Prisma.join(rows)}
+			ON CONFLICT ("key") DO UPDATE
+			SET "value" = EXCLUDED."value",
+			    "isPublic" = EXCLUDED."isPublic",
+			    "updatedAt" = now()
+		`
+	}
 
 	return getAll()
 }
@@ -114,4 +102,34 @@ const remove = async (key: string) => {
 	await prisma.setting.deleteMany({ where: { key } })
 }
 
-export const SettingService = { getAll, getMap, getCompany, setMany, remove, KNOWN_SETTINGS }
+/**
+ * Reads a setting with its declared fallback, so a fresh shop behaves sensibly
+ * rather than formatting every price with an empty currency.
+ */
+const read = async <T = string>(key: string): Promise<T> => {
+	const row = await prisma.setting.findUnique({ where: { key } })
+	const value = row?.value ?? SETTINGS[key]?.fallback
+	return value as T
+}
+
+/** The public block, resolved with fallbacks — what the storefront formats with. */
+const getPublic = async (): Promise<Record<string, unknown>> => {
+	const rows = await prisma.setting.findMany({ where: { key: { in: PUBLIC_KEYS } } })
+	const stored = new Map(rows.map((r) => [r.key, r.value]))
+
+	return Object.fromEntries(
+		PUBLIC_KEYS.map((key) => [key, stored.get(key) ?? SETTINGS[key]!.fallback])
+	)
+}
+
+export const SettingService = {
+	getAll,
+	getMap,
+	getCompany,
+	getPublic,
+	read,
+	setMany,
+	remove,
+	SETTINGS,
+	SETTING_GROUPS,
+}

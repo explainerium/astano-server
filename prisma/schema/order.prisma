@@ -126,11 +126,42 @@ model Order {
   addresses     OrderAddress[]
   taxLines      OrderTaxLine[]
   statusHistory OrderStatusHistory[]
+  notes         OrderNote[]
 
   @@index([userId])
   @@index([status])
   @@index([placedAt])
   @@map("orders")
+}
+
+/// A note staff add to an order after the fact.
+///
+/// Separate from `internalNote`, which is one field overwritten in place. This
+/// is a thread: who said what and when, kept in order. A note marked visible is
+/// emailed to the customer, which is why the flag is stored rather than being a
+/// property of how it was sent — a year later, "did we tell them?" has to be
+/// answerable from the record.
+model OrderNote {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Null once the staff account is deleted; the note stays on the order.
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  /// Kept so a deleted author still shows as somebody rather than nobody.
+  authorName String
+
+  body String
+
+  /// False is a private remark between staff. True was emailed to the customer.
+  isCustomerVisible Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@map("order_notes")
 }
 
 model OrderItem {

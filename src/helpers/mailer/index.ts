@@ -3,6 +3,8 @@ import type { LocaleCode } from "../../config/locales"
 import { t } from "../../i18n"
 import type { BankAccount } from "../../domain/payment/bankAccounts"
 import { SettingService } from "../../app/modules/setting/setting.service"
+import { EmailService } from "../../app/modules/email/email.service"
+import type { EmailKind } from "../../app/modules/email/emailRegistry"
 import { esc, renderLayout, rowsTable, toPlainText } from "./layout"
 import { sendMail } from "./transport"
 
@@ -14,9 +16,84 @@ export { isConfigured } from "./transport"
  * Every message is composed in the recipient's own locale — an order placed in
  * German stays German forever, which is why `locale` is frozen onto the order
  * rather than read from the current request.
+ *
+ * Every message also goes through `dispatch`, which is what applies the admin's
+ * per-email settings. Composing a `sendMail` call directly anywhere else means
+ * a mail that ignores its own on/off switch, and nobody finds out until a
+ * customer receives something the shop had switched off.
  */
 
 const url = (path: string): string => `${env.PUBLIC_BASE_URL}${path}`
+
+interface DispatchInput {
+	/** Customer mail. Staff mail leaves this out and takes the configured address. */
+	to?: string
+	locale: LocaleCode
+	/** i18n prefix — `${messages}.subject` and `${messages}.title` are the defaults. */
+	messages: string
+	/** Substituted into both the defaults and any admin override. */
+	vars?: Record<string, string | number>
+	intro: string
+	bodyHtml?: string
+	textLines?: string[]
+	action?: { label: string; url: string }
+	/** Defaults to the company address so a reply reaches a person. */
+	replyTo?: string | null
+	context?: Record<string, unknown>
+}
+
+/**
+ * Applies the admin's settings for one email kind and sends it.
+ *
+ * Returns quietly when the mail is switched off or has nowhere to go, which is
+ * the same shape as the old "no admin address configured" behaviour and is why
+ * nothing upstream has to care.
+ */
+const dispatch = async (kind: EmailKind, input: DispatchInput): Promise<void> => {
+	const company = await SettingService.getCompany()
+
+	/*
+	 * `{shop}` is available to every message, built-in or admin-written, without
+	 * each sender having to remember to pass it. Caller vars come second so a
+	 * sender can still override it if it ever needs to.
+	 */
+	const vars = { shop: company.name || "astano", ...input.vars }
+
+	const prepared = await EmailService.prepare(kind, vars)
+	if (!prepared) return
+
+	const to = input.to ?? prepared.recipient
+	if (!to) return
+
+	const L = (key: string, extra?: Record<string, string | number>) => t(key, input.locale, extra)
+
+	const subject = prepared.subject ?? L(`${input.messages}.subject`, vars)
+	const heading = prepared.heading ?? L(`${input.messages}.title`, vars)
+
+	sendMail(
+		{
+			to,
+			subject,
+			html: renderLayout({
+				title: heading,
+				intro: input.intro,
+				bodyHtml: input.bodyHtml ?? "",
+				company,
+				branding: prepared.branding,
+				additionalContent: prepared.additionalContent,
+				...(input.action ? { action: input.action } : {}),
+			}),
+			text: toPlainText(heading, input.intro, [
+				...(input.textLines ?? []),
+				...(prepared.additionalContent ? ["", prepared.additionalContent] : []),
+			]),
+			...(input.replyTo === null ? {} : { replyTo: input.replyTo ?? (company.email || undefined) }),
+		},
+		{ kind, ...input.context }
+	)
+}
+
+export { dispatch as sendTemplated }
 
 interface OrderMailInput {
 	to: string
@@ -71,11 +148,7 @@ const bankAccountsHtml = (accounts: BankAccount[], L: (key: string) => string): 
 }
 
 export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void> => {
-	const company = await SettingService.getCompany()
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
-
-	const title = L("email.orderPlaced.title", { number: input.orderNumber })
-	const intro = L("email.orderPlaced.intro", { name: input.customerName })
 
 	const itemsHtml = rowsTable([
 		...input.items.map((i) => ({
@@ -99,35 +172,48 @@ export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void
 				bankAccountsHtml(accounts, L)
 			: ""
 
-	sendMail(
-		{
-			to: input.to,
-			subject: L("email.orderPlaced.subject", { number: input.orderNumber }),
-			html: renderLayout({ title, intro, bodyHtml: itemsHtml + paymentHtml, company }),
-			text: toPlainText(title, intro, [
-				...input.items.map((i) => `${i.quantity} × ${i.name} — ${i.lineTotal} ${input.currency}`),
-				`${L("email.total")}: ${input.grandTotal} ${input.currency}`,
-				...(input.paymentInstructions ? ["", input.paymentInstructions] : []),
-				// The plain-text part matters here: a mail client with images and
-				// tables blocked still has to be able to show somebody an IBAN.
-				...accounts.flatMap((account) =>
-					[
-						"",
-						account.label ?? "",
-						account.accountName ? `${L("email.bank.accountName")}: ${account.accountName}` : "",
-						account.bankName ? `${L("email.bank.bankName")}: ${account.bankName}` : "",
-						account.accountNumber
-							? `${L("email.bank.accountNumber")}: ${account.accountNumber}`
-							: "",
-						account.iban ? `${L("email.bank.iban")}: ${account.iban}` : "",
-						account.bic ? `${L("email.bank.bic")}: ${account.bic}` : "",
-					].filter(Boolean)
-				),
-			]),
-			replyTo: company.email || undefined,
-		},
-		{ orderNumber: input.orderNumber }
-	)
+	await dispatch("order-placed", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.orderPlaced",
+		vars: { number: input.orderNumber, name: input.customerName, total: `${input.grandTotal} ${input.currency}` },
+		intro: L("email.orderPlaced.intro", { name: input.customerName }),
+		bodyHtml: itemsHtml + paymentHtml,
+		textLines: [
+			...input.items.map((i) => `${i.quantity} × ${i.name} — ${i.lineTotal} ${input.currency}`),
+			`${L("email.total")}: ${input.grandTotal} ${input.currency}`,
+			...(input.paymentInstructions ? ["", input.paymentInstructions] : []),
+			// The plain-text part matters here: a mail client with images and
+			// tables blocked still has to be able to show somebody an IBAN.
+			...accounts.flatMap((account) =>
+				[
+					"",
+					account.label ?? "",
+					account.accountName ? `${L("email.bank.accountName")}: ${account.accountName}` : "",
+					account.bankName ? `${L("email.bank.bankName")}: ${account.bankName}` : "",
+					account.accountNumber ? `${L("email.bank.accountNumber")}: ${account.accountNumber}` : "",
+					account.iban ? `${L("email.bank.iban")}: ${account.iban}` : "",
+					account.bic ? `${L("email.bank.bic")}: ${account.bic}` : "",
+				].filter(Boolean)
+			),
+		],
+		context: { orderNumber: input.orderNumber },
+	})
+}
+
+/**
+ * Which of the status mails a move belongs to.
+ *
+ * Four statuses read as events in their own right and get their own message and
+ * their own on/off switch; the rest share the generic one. WooCommerce splits
+ * them the same way, and for the same reason — "your order was refunded" and
+ * "your order is on hold" have nothing in common but the trigger.
+ */
+const STATUS_KINDS: Record<string, { kind: EmailKind; messages: string }> = {
+	COMPLETED: { kind: "order-completed", messages: "email.orderCompleted" },
+	CANCELLED: { kind: "order-cancelled", messages: "email.orderCancelled" },
+	REFUNDED: { kind: "order-refunded", messages: "email.orderRefunded" },
+	FAILED: { kind: "order-failed", messages: "email.orderFailed" },
 }
 
 export const sendOrderStatusChanged = async (input: {
@@ -137,23 +223,61 @@ export const sendOrderStatusChanged = async (input: {
 	customerName: string
 	status: string
 }): Promise<void> => {
-	const company = await SettingService.getCompany()
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+	const statusLabel = L(`orderStatus.${input.status}`)
+
+	const specific = STATUS_KINDS[input.status]
+	const vars = { number: input.orderNumber, name: input.customerName, status: statusLabel }
+
+	await dispatch(specific?.kind ?? "order-status", {
+		to: input.to,
+		locale: input.locale,
+		messages: specific?.messages ?? "email.orderStatus",
+		vars,
+		intro: L(`${specific?.messages ?? "email.orderStatus"}.intro`, vars),
+		context: { orderNumber: input.orderNumber, status: input.status },
+	})
+}
+
+export const sendCustomerNote = async (input: {
+	to: string
+	locale: LocaleCode
+	orderNumber: string
+	customerName: string
+	note: string
+}): Promise<void> => {
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+	const vars = { number: input.orderNumber, name: input.customerName }
+
+	await dispatch("customer-note", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.customerNote",
+		vars,
+		intro: L("email.customerNote.intro", vars),
+		bodyHtml: `<p style="margin:0;font-size:15px;line-height:1.6;white-space:pre-line;">${esc(input.note)}</p>`,
+		textLines: ["", input.note],
+		context: { orderNumber: input.orderNumber },
+	})
+}
+
+export const sendAccountWelcome = async (input: {
+	to: string
+	locale: LocaleCode
+	name: string
+}): Promise<void> => {
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
 
-	const statusLabel = L(`orderStatus.${input.status}`)
-	const title = L("email.orderStatus.title", { number: input.orderNumber })
-	const intro = L("email.orderStatus.intro", { name: input.customerName, status: statusLabel })
-
-	sendMail(
-		{
-			to: input.to,
-			subject: L("email.orderStatus.subject", { number: input.orderNumber, status: statusLabel }),
-			html: renderLayout({ title, intro, bodyHtml: "", company }),
-			text: toPlainText(title, intro, []),
-			replyTo: company.email || undefined,
-		},
-		{ orderNumber: input.orderNumber, status: input.status }
-	)
+	await dispatch("account-welcome", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.accountWelcome",
+		vars: { name: input.name },
+		intro: L("email.accountWelcome.intro", { name: input.name }),
+		action: { label: L("email.accountWelcome.action"), url: url("/account") },
+		textLines: [url("/account")],
+		context: { kind: "account-welcome" },
+	})
 }
 
 export const sendPasswordReset = async (input: {
@@ -161,28 +285,65 @@ export const sendPasswordReset = async (input: {
 	locale: LocaleCode
 	token: string
 }): Promise<void> => {
-	const company = await SettingService.getCompany()
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
-
-	const title = L("email.passwordReset.title")
-	const intro = L("email.passwordReset.intro")
 	const link = url(`/reset-password?token=${input.token}`)
 
-	sendMail(
-		{
-			to: input.to,
-			subject: L("email.passwordReset.subject"),
-			html: renderLayout({
-				title,
-				intro,
-				bodyHtml: `<p style="margin:0;font-size:13px;color:#777;">${esc(L("email.passwordReset.expiry"))}</p>`,
-				company,
-				action: { label: L("email.passwordReset.action"), url: link },
-			}),
-			text: toPlainText(title, intro, [link, "", L("email.passwordReset.expiry")]),
+	await dispatch("password-reset", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.passwordReset",
+		intro: L("email.passwordReset.intro"),
+		bodyHtml: `<p style="margin:0;font-size:13px;opacity:0.7;">${esc(L("email.passwordReset.expiry"))}</p>`,
+		action: { label: L("email.passwordReset.action"), url: link },
+		textLines: [link, "", L("email.passwordReset.expiry")],
+		// No reply-to: a password reset is not a conversation, and inviting a
+		// reply to it invites somebody to email their new password.
+		replyTo: null,
+	})
+}
+
+export const sendEmailChangeVerification = async (input: {
+	to: string
+	locale: LocaleCode
+	/** Built by the caller — the landing path is translated per locale. */
+	verifyUrl: string
+}): Promise<void> => {
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+
+	await dispatch("email-change", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.emailChange",
+		intro: L("email.emailChange.intro"),
+		bodyHtml:
+			`<p style="margin:0 0 8px;font-size:13px;opacity:0.7;">${esc(L("email.emailChange.expiry"))}</p>` +
+			`<p style="margin:0;font-size:13px;opacity:0.7;">${esc(L("email.emailChange.ignore"))}</p>`,
+		action: { label: L("email.emailChange.action"), url: input.verifyUrl },
+		textLines: [input.verifyUrl, "", L("email.emailChange.expiry"), L("email.emailChange.ignore")],
+		replyTo: null,
+		context: {
+			// Without SMTP the mailer logs only recipient and subject, and the link
+			// lives inside the HTML — so it would be unreachable and this flow
+			// untestable locally. Development only.
+			...(env.NODE_ENV === "development" ? { verifyUrl: input.verifyUrl } : {}),
 		},
-		{ kind: "password-reset" }
-	)
+	})
+}
+
+export const sendEmailChanged = async (input: {
+	to: string
+	locale: LocaleCode
+	newEmail: string
+}): Promise<void> => {
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+
+	await dispatch("email-changed", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.emailChanged",
+		vars: { email: input.newEmail },
+		intro: L("email.emailChanged.intro", { email: input.newEmail }),
+	})
 }
 
 export const sendQuoteSubmitted = async (input: {
@@ -195,40 +356,23 @@ export const sendQuoteSubmitted = async (input: {
 	/// Guests reach their thread with this; signed-in customers do not need it.
 	accessToken?: string | null
 }): Promise<void> => {
-	const company = await SettingService.getCompany()
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
-
-	const heading = L("email.quoteSubmitted.title", { number: input.quoteNumber })
-	const intro = L("email.quoteSubmitted.intro", { name: input.contactName })
-
-	const itemsHtml = rowsTable(
-		input.items.map((i) => ({ label: i.name, value: String(i.quantity) }))
-	)
 
 	const link = input.accessToken
 		? url(`/quote/${encodeURIComponent(input.accessToken)}`)
 		: url("/account/quotes")
 
-	sendMail(
-		{
-			to: input.to,
-			subject: L("email.quoteSubmitted.subject", { number: input.quoteNumber }),
-			html: renderLayout({
-				title: heading,
-				intro,
-				bodyHtml: itemsHtml,
-				company,
-				action: { label: L("email.quoteSubmitted.action"), url: link },
-			}),
-			text: toPlainText(heading, intro, [
-				...input.items.map((i) => `${i.quantity} × ${i.name}`),
-				"",
-				link,
-			]),
-			replyTo: company.email || undefined,
-		},
-		{ quoteNumber: input.quoteNumber }
-	)
+	await dispatch("quote-submitted", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.quoteSubmitted",
+		vars: { number: input.quoteNumber, name: input.contactName, title: input.title },
+		intro: L("email.quoteSubmitted.intro", { name: input.contactName }),
+		bodyHtml: rowsTable(input.items.map((i) => ({ label: i.name, value: String(i.quantity) }))),
+		action: { label: L("email.quoteSubmitted.action"), url: link },
+		textLines: [...input.items.map((i) => `${i.quantity} × ${i.name}`), "", link],
+		context: { quoteNumber: input.quoteNumber },
+	})
 }
 
 export const sendQuoteAnswered = async (input: {
@@ -238,31 +382,22 @@ export const sendQuoteAnswered = async (input: {
 	contactName: string
 	accessToken?: string | null
 }): Promise<void> => {
-	const company = await SettingService.getCompany()
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
 
-	const title = L("email.quoteAnswered.title", { number: input.quoteNumber })
-	const intro = L("email.quoteAnswered.intro", { name: input.contactName })
 	const link = input.accessToken
 		? url(`/quote/${encodeURIComponent(input.accessToken)}`)
 		: url("/account/quotes")
 
-	sendMail(
-		{
-			to: input.to,
-			subject: L("email.quoteAnswered.subject", { number: input.quoteNumber }),
-			html: renderLayout({
-				title,
-				intro,
-				bodyHtml: "",
-				company,
-				action: { label: L("email.quoteAnswered.action"), url: link },
-			}),
-			text: toPlainText(title, intro, [link]),
-			replyTo: company.email || undefined,
-		},
-		{ quoteNumber: input.quoteNumber }
-	)
+	await dispatch("quote-answered", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.quoteAnswered",
+		vars: { number: input.quoteNumber, name: input.contactName },
+		intro: L("email.quoteAnswered.intro", { name: input.contactName }),
+		action: { label: L("email.quoteAnswered.action"), url: link },
+		textLines: [link],
+		context: { quoteNumber: input.quoteNumber },
+	})
 }
 
 export const sendAccountDecision = async (input: {
@@ -271,53 +406,66 @@ export const sendAccountDecision = async (input: {
 	name: string
 	approved: boolean
 }): Promise<void> => {
-	const company = await SettingService.getCompany()
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
 
-	const key = input.approved ? "email.accountApproved" : "email.accountRejected"
-	const title = L(`${key}.title`)
-	const intro = L(`${key}.intro`, { name: input.name })
+	const messages = input.approved ? "email.accountApproved" : "email.accountRejected"
 
-	sendMail(
-		{
-			to: input.to,
-			subject: L(`${key}.subject`),
-			html: renderLayout({
-				title,
-				intro,
-				bodyHtml: "",
-				company,
-				...(input.approved
-					? { action: { label: L("email.accountApproved.action"), url: url("/") } }
-					: {}),
-			}),
-			text: toPlainText(title, intro, []),
-			replyTo: company.email || undefined,
-		},
-		{ kind: input.approved ? "account-approved" : "account-rejected" }
-	)
+	await dispatch(input.approved ? "account-approved" : "account-rejected", {
+		to: input.to,
+		locale: input.locale,
+		messages,
+		vars: { name: input.name },
+		intro: L(`${messages}.intro`, { name: input.name }),
+		...(input.approved
+			? { action: { label: L("email.accountApproved.action"), url: url("/") } }
+			: {}),
+	})
 }
 
-/** Tells staff a new order or quote has landed. */
+/**
+ * Tells staff something has landed.
+ *
+ * The caller passes the kind rather than a recipient: which address it goes to
+ * is the admin's setting, not the caller's business, and routing it here is
+ * what lets low-stock warnings reach whoever actually reorders.
+ */
 export const notifyStaff = async (input: {
+	kind: Extract<
+		EmailKind,
+		"staff-new-order" | "staff-new-quote" | "staff-new-contact" | "staff-b2b-application" | "staff-low-stock"
+	>
 	locale: LocaleCode
 	subject: string
 	title: string
 	intro: string
+	/**
+	 * Forces the recipient. Only previews and test sends pass this — real
+	 * notifications take the address from the settings, so that a shop which
+	 * changes where its alerts go does not have to redeploy.
+	 */
+	to?: string
 }): Promise<void> => {
-	const map = await SettingService.getMap()
-	const to = map["mail.adminNotifyAddress"]
-	if (!to || typeof to !== "string") return
-
 	const company = await SettingService.getCompany()
+	const prepared = await EmailService.prepare(input.kind, { shop: company.name || "astano" })
+	if (!prepared) return
+
+	const to = input.to ?? prepared.recipient
+	if (!to) return
 
 	sendMail(
 		{
 			to,
-			subject: input.subject,
-			html: renderLayout({ title: input.title, intro: input.intro, bodyHtml: "", company }),
-			text: toPlainText(input.title, input.intro, []),
+			subject: prepared.subject ?? input.subject,
+			html: renderLayout({
+				title: prepared.heading ?? input.title,
+				intro: input.intro,
+				bodyHtml: "",
+				company,
+				branding: prepared.branding,
+				additionalContent: prepared.additionalContent,
+			}),
+			text: toPlainText(prepared.heading ?? input.title, input.intro, []),
 		},
-		{ kind: "staff-notification" }
+		{ kind: input.kind }
 	)
 }

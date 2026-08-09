@@ -2,14 +2,12 @@ import bcrypt from "bcrypt"
 import type { Address, Prisma } from "@prisma/client"
 import { env } from "../../../config"
 import { localePrefix, type LocaleCode } from "../../../config/locales"
-import { renderLayout, toPlainText } from "../../../helpers/mailer/layout"
-import { sendMail } from "../../../helpers/mailer/transport"
+import { sendEmailChanged, sendEmailChangeVerification } from "../../../helpers/mailer"
 import { t } from "../../../i18n"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { durationToMs, generateToken, hashToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
-import { SettingService } from "../setting/setting.service"
 import { toPublicUser, type PublicUser } from "../auth/auth.interface"
 
 const notFound = () =>
@@ -118,39 +116,11 @@ const VERIFY_PATH: Record<string, string> = {
 const verifyUrl = (locale: LocaleCode, token: string): string =>
 	`${env.PUBLIC_BASE_URL}${localePrefix(locale)}${VERIFY_PATH[locale] ?? VERIFY_PATH.en}?token=${token}`
 
-const sendVerification = async (
-	to: string,
-	locale: LocaleCode,
-	token: string
-): Promise<void> => {
-	const company = await SettingService.getCompany()
-	const L = (key: string) => t(key, locale)
-
-	const title = L("email.emailChange.title")
-	const intro = L("email.emailChange.intro")
-	const url = verifyUrl(locale, token)
-
-	sendMail(
-		{
-			to,
-			subject: L("email.emailChange.subject"),
-			html: renderLayout({
-				title,
-				intro,
-				bodyHtml: `<p style="margin:0 0 8px;font-size:13px;color:#777;">${L("email.emailChange.expiry")}</p><p style="margin:0;font-size:13px;color:#777;">${L("email.emailChange.ignore")}</p>`,
-				company,
-				action: { label: L("email.emailChange.action"), url },
-			}),
-			text: toPlainText(title, intro, [url]),
-		},
-		{
-			kind: "email-change",
-			// Without SMTP the mailer logs only recipient and subject, and the link
-			// lives inside the HTML — so it would be unreachable and this flow
-			// untestable locally. Development only.
-			...(env.NODE_ENV === "development" ? { verifyUrl: url } : {}),
-		}
-	)
+const sendVerification = async (to: string, locale: LocaleCode, token: string): Promise<void> => {
+	// Composed in the mailer like every other message, so it picks up the shop's
+	// branding and the admin's settings. It used to build its own layout here,
+	// which meant it quietly ignored both.
+	await sendEmailChangeVerification({ to, locale, verifyUrl: verifyUrl(locale, token) })
 }
 
 /**
@@ -162,21 +132,7 @@ const sendVerification = async (
  * address they still control, while they can still act on it.
  */
 const notifyOldAddress = async (to: string, locale: LocaleCode, newEmail: string): Promise<void> => {
-	const company = await SettingService.getCompany()
-	const L = (key: string, vars?: Record<string, string>) => t(key, locale, vars)
-
-	const title = L("email.emailChanged.title")
-	const intro = L("email.emailChanged.intro", { email: newEmail })
-
-	sendMail(
-		{
-			to,
-			subject: L("email.emailChanged.subject"),
-			html: renderLayout({ title, intro, bodyHtml: "", company }),
-			text: toPlainText(title, intro, []),
-		},
-		{ kind: "email-changed-notice" }
-	)
+	await sendEmailChanged({ to, locale, newEmail })
 }
 
 /** Whether the address is free — including accounts that are only soft-deleted. */

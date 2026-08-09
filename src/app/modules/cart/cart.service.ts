@@ -4,6 +4,14 @@ import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { applyMoqFloor, getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
+import {
+	availableOf,
+	canTake,
+	DEFAULT_STOCK_RULES,
+	readStockRules,
+	type StockRules,
+} from "../../../domain/stock/availability"
+import { SettingService } from "../setting/setting.service"
 import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
@@ -110,7 +118,8 @@ const view = (
 	locale: LocaleCode,
 	role: PricingRole,
 	bundleDiscounts?: Map<string, Decimal>,
-	externalTiers?: (productId: string) => ExternalTiers
+	externalTiers?: (productId: string) => ExternalTiers,
+	stockRules: StockRules = DEFAULT_STOCK_RULES
 ) => {
 	const lines = cart.items
 		// Option lines are nested under their parent rather than listed flat.
@@ -137,9 +146,8 @@ const view = (
 					quantity: i.quantity,
 					moq,
 					belowMoq: isBelowMoq(i.quantity, moq),
-					inStock:
-						!i.variant.manageStock || i.variant.stock >= i.quantity || i.variant.allowBackorder,
-					availableStock: i.variant.manageStock ? i.variant.stock : null,
+					inStock: canTake(i.variant, i.quantity, stockRules),
+					availableStock: availableOf(i.variant, stockRules),
 					unitPrice: price.unitPrice?.toFixed(2) ?? null,
 					listPrice: price.listPrice?.toFixed(2) ?? null,
 					onSale: price.onSale,
@@ -305,7 +313,14 @@ const get = async (owner: CartOwner, locale: LocaleCode) => {
 	})
 
 	return {
-		cart: view(cart, locale, role, await loadBundleDiscounts(cart.items), externalTiers),
+		cart: view(
+			cart,
+			locale,
+			role,
+			await loadBundleDiscounts(cart.items),
+			externalTiers,
+			readStockRules(await SettingService.getMap())
+		),
 		token,
 	}
 }
@@ -353,10 +368,12 @@ const addItem = async (
 
 	const newQuantity = (existing?.quantity ?? 0) + payload.quantity
 
-	if (variant.manageStock && !variant.allowBackorder && newQuantity > variant.stock) {
+	const stockRules = readStockRules(await SettingService.getMap())
+
+	if (!canTake(variant, newQuantity, stockRules)) {
 		throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
 			messageKey: "cart.insufficientStock",
-			messageVars: { available: String(variant.stock) },
+			messageVars: { available: String(availableOf(variant, stockRules) ?? 0) },
 		})
 	}
 
@@ -382,7 +399,10 @@ const addItem = async (
 	})
 
 	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return { cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items)), token }
+	return {
+		cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items), undefined, stockRules),
+		token,
+	}
 }
 
 const updateItem = async (
@@ -417,21 +437,23 @@ const updateItem = async (
 	// on purpose — the line already exists, so refusing would just strand it.
 	const { quantity: finalQuantity, adjusted } = applyMoqFloor(quantity, moq)
 
-	if (
-		item.variant.manageStock &&
-		!item.variant.allowBackorder &&
-		finalQuantity > item.variant.stock
-	) {
+	const stockRules = readStockRules(await SettingService.getMap())
+
+	if (!canTake(item.variant, finalQuantity, stockRules)) {
 		throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
 			messageKey: "cart.insufficientStock",
-			messageVars: { available: String(item.variant.stock) },
+			messageVars: { available: String(availableOf(item.variant, stockRules) ?? 0) },
 		})
 	}
 
 	await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: finalQuantity } })
 
 	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return { cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items)), token, adjusted }
+	return {
+		cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items), undefined, stockRules),
+		token,
+		adjusted,
+	}
 }
 
 const removeItem = async (owner: CartOwner, itemId: string, locale: LocaleCode) => {
@@ -448,7 +470,17 @@ const removeItem = async (owner: CartOwner, itemId: string, locale: LocaleCode) 
 	await prisma.cartItem.delete({ where: { id: itemId } })
 
 	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return { cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items)), token }
+	return {
+		cart: view(
+			fresh!,
+			locale,
+			roleOf(owner),
+			await loadBundleDiscounts(fresh!.items),
+			undefined,
+			readStockRules(await SettingService.getMap())
+		),
+		token,
+	}
 }
 
 const clear = async (owner: CartOwner, locale: LocaleCode) => {
@@ -456,7 +488,17 @@ const clear = async (owner: CartOwner, locale: LocaleCode) => {
 	await prisma.cartItem.deleteMany({ where: { cartId: cart.id } })
 
 	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return { cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items)), token }
+	return {
+		cart: view(
+			fresh!,
+			locale,
+			roleOf(owner),
+			await loadBundleDiscounts(fresh!.items),
+			undefined,
+			readStockRules(await SettingService.getMap())
+		),
+		token,
+	}
 }
 
 export const CartService = { get, addItem, updateItem, removeItem, clear }

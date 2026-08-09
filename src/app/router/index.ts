@@ -17,6 +17,7 @@ import { AdminOrderRoutes, CheckoutRoutes, OrderRoutes } from "../modules/order/
 import { PaymentRoutes } from "../modules/payment/payment.routes"
 import { AdminPaymentGatewayRoutes } from "../modules/paymentGateway/paymentGateway.routes"
 import { AdminQuoteRoutes, QuoteRoutes } from "../modules/quote/quote.routes"
+import { EmailRoutes } from "../modules/email/email.routes"
 import { SettingRoutes } from "../modules/setting/setting.routes"
 import { ShippingRoutes } from "../modules/shipping/shipping.routes"
 import { TaxRoutes } from "../modules/tax/tax.routes"
@@ -44,6 +45,7 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/admin/b2b", route: AdminB2bRoutes },
 	{ path: "/admin/dashboard", route: AdminDashboardRoutes },
 	{ path: "/settings", route: SettingRoutes },
+	{ path: "/admin/emails", route: EmailRoutes },
 	{ path: "/categories", route: CategoryRoutes },
 	{ path: "/admin/categories", route: AdminCategoryRoutes },
 	{ path: "/attributes", route: AttributeRoutes },
