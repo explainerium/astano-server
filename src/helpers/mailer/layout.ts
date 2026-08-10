@@ -70,7 +70,14 @@ export const renderLayout = ({
 				.filter((part) => part.trim())
 				.map(escapeHtml)
 				.join(" · ")}<br>
-          ${company.vatId ? `VAT ${escapeHtml(company.vatId)} · ` : ""}${company.email ? escapeHtml(company.email) : ""}${company.phone ? ` · ${escapeHtml(company.phone)}` : ""}`
+          ${[
+					company.vatId ? `VAT ${escapeHtml(company.vatId)}` : "",
+					company.email ? escapeHtml(company.email) : "",
+					company.phone ? escapeHtml(company.phone) : "",
+					company.website ? escapeHtml(company.website) : "",
+				]
+					.filter(Boolean)
+					.join(" · ")}`
 
 	return `
 <!doctype html>

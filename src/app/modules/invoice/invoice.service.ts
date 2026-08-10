@@ -221,7 +221,7 @@ const renderHtml = (order: InvoiceOrder, company: CompanyDetails, locale: Locale
   <div class="muted" style="margin-top:34px;border-top:1px solid #ddd;padding-top:10px;line-height:1.7;">
     ${company.vatId ? `${esc(L("invoice.vatId"))}: ${esc(company.vatId)}<br>` : ""}
     ${company.registerNumber ? `${esc(L("invoice.register"))}: ${esc(company.registerNumber)}<br>` : ""}
-    ${company.email ? `${esc(company.email)}` : ""}${company.phone ? ` · ${esc(company.phone)}` : ""}
+    ${[company.email, company.phone, company.website].filter(Boolean).map(esc).join(" · ")}
     ${company.invoiceFooter ? `<div style="margin-top:8px;">${esc(company.invoiceFooter)}</div>` : ""}
   </div>
 </body></html>`

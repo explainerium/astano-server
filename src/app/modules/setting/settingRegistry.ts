@@ -28,6 +28,14 @@ export type SettingType =
 	| "color"
 
 export interface SettingDefinition {
+	/**
+	 * Stored, but nothing reads it yet.
+	 *
+	 * Set only where the feature is genuinely still to be built, so a check can
+	 * tell a deliberate placeholder from a setting somebody forgot to wire up.
+	 * The help text must say so too — the admin cannot read this file.
+	 */
+	pending?: boolean
 	label: string
 	/** Shown under the field. Say what it changes, not what it is. */
 	help?: string
@@ -136,17 +144,26 @@ export const SETTING_GROUPS: {
 
 export const SETTINGS: Record<string, SettingDefinition> = {
 	// ── Company ────────────────────────────────────────────────────────────
-	"company.name": { label: "Legal entity on invoices", type: "text", fallback: "", group: "company" },
-	"company.street": { label: "Address line 1", type: "text", fallback: "", group: "company" },
+	/*
+	 * The address block is public.
+	 *
+	 * It is printed on every invoice, in the imprint and in the footer — there
+	 * is nothing private about where a shop trades from. Public so the footer
+	 * can render it: it used to be typed into the markup, which meant changing
+	 * the phone number here changed it on invoices and nowhere else.
+	 */
+	"company.name": { label: "Legal entity on invoices", type: "text", fallback: "", isPublic: true, group: "company" },
+	"company.street": { label: "Address line 1", type: "text", fallback: "", isPublic: true, group: "company" },
 	"company.street2": {
 		label: "Address line 2",
 		help: "Optional — a floor, a unit, a c/o line.",
 		type: "text",
 		fallback: "",
+		isPublic: true,
 		group: "company",
 	},
-	"company.postcode": { label: "Postcode", type: "text", fallback: "", group: "company" },
-	"company.city": { label: "City", type: "text", fallback: "", group: "company" },
+	"company.postcode": { label: "Postcode", type: "text", fallback: "", isPublic: true, group: "company" },
+	"company.city": { label: "City", type: "text", fallback: "", isPublic: true, group: "company" },
 	/*
 	 * Country and state as two fields, where WooCommerce has one combined
 	 * picker. The pair is what the rest of the shop already reads — tax rates
@@ -180,7 +197,8 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 		group: "company",
 	},
 	"company.phone": { label: "Contact phone", type: "text", fallback: "", isPublic: true, group: "company" },
-	"company.website": { label: "Shop URL", type: "text", fallback: "", isPublic: true, group: "company" },
+	/** Printed on invoices and in email footers. Server-side only — not public. */
+	"company.website": { label: "Shop URL", type: "text", fallback: "", group: "company" },
 
 	// ── Invoices ───────────────────────────────────────────────────────────
 	"invoice.footer": {
@@ -494,6 +512,7 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 		group: "features",
 	},
 	"coupons.enabled": {
+		pending: true,
 		label: "Accept coupon codes",
 		help: "Shows the coupon field at checkout. Nothing uses it until coupons are built.",
 		type: "boolean",
@@ -502,8 +521,9 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 		group: "features",
 	},
 	"coupons.sequential": {
+		pending: true,
 		label: "Apply coupon discounts one after the other",
-		help: "With several coupons, the first comes off the full price and the next off what is left. Stored now, read when coupons are built.",
+		help: "With several coupons, the first comes off the full price and the next off what is left. Nothing uses it until coupons are built.",
 		type: "boolean",
 		fallback: false,
 		isPublic: true,
