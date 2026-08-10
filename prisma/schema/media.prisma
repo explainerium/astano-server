@@ -56,6 +56,7 @@ model Asset {
   products         ProductAsset[]
   featuredFor      Product[]        @relation("ProductFeatured")
   categoryImageFor Category[]       @relation("CategoryImage")
+  categoryIconFor  Category[]       @relation("CategoryIcon")
   variantImageFor  ProductVariant[] @relation("VariantImage")
 
   createdAt DateTime @default(now())

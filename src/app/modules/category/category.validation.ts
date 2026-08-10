@@ -25,6 +25,7 @@ export const createCategorySchema = z.object({
 		isHidden: z.boolean().default(false),
 		isOptionCategory: z.boolean().default(false),
 		imageAssetId: z.string().uuid().nullable().optional(),
+		iconAssetId: z.string().uuid().nullable().optional(),
 		// At least one translation, and the default locale must be present so
 		// every category always has a name to fall back to.
 		translations: z.array(translation).min(1),
@@ -39,6 +40,7 @@ export const updateCategorySchema = z.object({
 		isHidden: z.boolean().optional(),
 		isOptionCategory: z.boolean().optional(),
 		imageAssetId: z.string().uuid().nullable().optional(),
+		iconAssetId: z.string().uuid().nullable().optional(),
 		translations: z.array(translation).optional(),
 	}),
 })

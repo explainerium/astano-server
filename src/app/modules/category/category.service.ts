@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import type { LocaleCode } from "../../../config/locales"
 import { DEFAULT_LOCALE } from "../../../config/locales"
+import { toPublicAsset, type PublicAsset } from "../../../domain/media/publicAsset"
 import { copyNameFor } from "../../../shared/duplicate"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
@@ -25,6 +26,9 @@ export interface CategoryView {
 	name: string
 	slug: string
 	description: string | null
+	/** Both optional, and both null far more often than not. */
+	image: CategoryAsset | null
+	icon: CategoryAsset | null
 	productCount: number
 	children?: CategoryView[]
 }
@@ -45,14 +49,44 @@ export interface AdminCategoryView {
 	isHidden: boolean
 	isOptionCategory: boolean
 	imageAssetId: string | null
+	iconAssetId: string | null
+	/**
+	 * Resolved alongside the id so the editor can show what is already chosen.
+	 * With only an id it would have to fetch the whole media library to draw one
+	 * thumbnail, or show nothing and look like the field was empty.
+	 */
+	image: CategoryAsset | null
+	icon: CategoryAsset | null
 	productCount: number
 	translations: TranslationInput[]
 	createdAt: Date
 }
 
-type CategoryWithTranslations = Prisma.CategoryGetPayload<{
-	include: { translations: true; _count: { select: { products: true } } }
-}>
+export type CategoryAsset = PublicAsset
+
+const assetSelect = {
+	select: { id: true, storageKey: true, derivatives: true, width: true, height: true },
+} as const
+
+const adminInclude = {
+	translations: true,
+	_count: { select: { products: true } },
+	image: assetSelect,
+	icon: assetSelect,
+} satisfies Prisma.CategoryInclude
+
+type CategoryForAdmin = Prisma.CategoryGetPayload<{ include: typeof adminInclude }>
+
+const toAsset = toPublicAsset
+
+/**
+ * The storefront needs the pictures too, or an admin can set one and nothing
+ * ever shows it. Same two joins as the admin include — categories are a short
+ * list and this is the query that renders the menu.
+ */
+const publicInclude = adminInclude
+
+type CategoryWithTranslations = CategoryForAdmin
 
 /**
  * Picks the requested language, falling back to the default locale and then to
@@ -74,6 +108,8 @@ const view = (row: CategoryWithTranslations, locale: LocaleCode): CategoryView =
 		name: t?.name ?? "(untitled)",
 		slug: t?.slug ?? row.id,
 		description: t?.description ?? null,
+		image: toAsset(row.image),
+		icon: toAsset(row.icon),
 		productCount: row._count.products,
 	}
 }
@@ -104,7 +140,7 @@ const list = async (
 	const rows = await prisma.category.findMany({
 		// R13: hidden categories vanish from every public list.
 		where: opts.includeHidden ? {} : { isHidden: false },
-		include: { translations: true, _count: { select: { products: true } } },
+		include: publicInclude,
 		orderBy: { sortOrder: "asc" },
 	})
 
@@ -115,7 +151,7 @@ const list = async (
 const getBySlug = async (slug: string, locale: LocaleCode): Promise<CategoryView> => {
 	const row = await prisma.category.findFirst({
 		where: { translations: { some: { slug } }, isHidden: false },
-		include: { translations: true, _count: { select: { products: true } } },
+		include: publicInclude,
 	})
 
 	// R13: a hidden category's URL must 404, not redirect or render empty.
@@ -131,7 +167,7 @@ const getBySlug = async (slug: string, locale: LocaleCode): Promise<CategoryView
 const getById = async (id: string, locale: LocaleCode): Promise<CategoryView> => {
 	const row = await prisma.category.findUnique({
 		where: { id },
-		include: { translations: true, _count: { select: { products: true } } },
+		include: publicInclude,
 	})
 
 	if (!row) {
@@ -170,6 +206,7 @@ const create = async (
 		isHidden?: boolean
 		isOptionCategory?: boolean
 		imageAssetId?: string | null
+		iconAssetId?: string | null
 		translations: TranslationInput[]
 	},
 	locale: LocaleCode
@@ -192,9 +229,10 @@ const create = async (
 			isHidden: payload.isHidden ?? false,
 			isOptionCategory: payload.isOptionCategory ?? false,
 			imageAssetId: payload.imageAssetId ?? null,
+			iconAssetId: payload.iconAssetId ?? null,
 			translations: { create: translations },
 		},
-		include: { translations: true, _count: { select: { products: true } } },
+		include: publicInclude,
 	})
 
 	return view(row, locale)
@@ -208,6 +246,7 @@ const update = async (
 		isHidden?: boolean
 		isOptionCategory?: boolean
 		imageAssetId?: string | null
+		iconAssetId?: string | null
 		translations?: TranslationInput[]
 	},
 	locale: LocaleCode
@@ -254,6 +293,7 @@ const update = async (
 					? { isOptionCategory: payload.isOptionCategory }
 					: {}),
 				...(payload.imageAssetId !== undefined ? { imageAssetId: payload.imageAssetId } : {}),
+				...(payload.iconAssetId !== undefined ? { iconAssetId: payload.iconAssetId } : {}),
 			},
 		})
 
@@ -324,6 +364,7 @@ const duplicate = async (id: string, locale: LocaleCode): Promise<CategoryView> 
 			isHidden: row.isHidden,
 			isOptionCategory: row.isOptionCategory,
 			imageAssetId: row.imageAssetId,
+			iconAssetId: row.iconAssetId,
 			// Slug omitted: `resolveSlug` derives a fresh one from the copied name,
 			// so the duplicate cannot claim the original's URL.
 			translations: row.translations.map((t) => ({
@@ -369,13 +410,16 @@ const remove = async (id: string): Promise<void> => {
 
 // ─── Staff reads ─────────────────────────────────────────────────────────────
 
-const adminView = (row: CategoryWithTranslations): AdminCategoryView => ({
+const adminView = (row: CategoryForAdmin): AdminCategoryView => ({
 	id: row.id,
 	parentId: row.parentId,
 	sortOrder: row.sortOrder,
 	isHidden: row.isHidden,
 	isOptionCategory: row.isOptionCategory,
 	imageAssetId: row.imageAssetId,
+	iconAssetId: row.iconAssetId,
+	image: toAsset(row.image),
+	icon: toAsset(row.icon),
 	productCount: row._count.products,
 	translations: row.translations.map((t) => ({
 		locale: t.locale,
@@ -397,7 +441,7 @@ const adminView = (row: CategoryWithTranslations): AdminCategoryView => ({
  */
 const adminList = async (): Promise<AdminCategoryView[]> => {
 	const rows = await prisma.category.findMany({
-		include: { translations: true, _count: { select: { products: true } } },
+		include: adminInclude,
 		orderBy: { sortOrder: "asc" },
 	})
 
@@ -407,7 +451,7 @@ const adminList = async (): Promise<AdminCategoryView[]> => {
 const adminGetById = async (id: string): Promise<AdminCategoryView> => {
 	const row = await prisma.category.findUnique({
 		where: { id },
-		include: { translations: true, _count: { select: { products: true } } },
+		include: adminInclude,
 	})
 
 	if (!row) {

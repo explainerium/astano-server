@@ -70,8 +70,16 @@ model Category {
   /// Marks an "… Options" category holding add-ons rather than sellable goods.
   isOptionCategory Boolean @default(false)
 
+  /// The banner shown on the category's own page and in a category grid.
   imageAssetId String?
   image        Asset?  @relation("CategoryImage", fields: [imageAssetId], references: [id], onDelete: SetNull)
+
+  /// A small mark for menus and filter lists, where the banner would be
+  /// unreadable at thumbnail size. Separate from the image rather than a
+  /// resized version of it: the two are cropped for different jobs, and a
+  /// 1600px banner squeezed into 24px reads as a smudge.
+  iconAssetId String?
+  icon        Asset?  @relation("CategoryIcon", fields: [iconAssetId], references: [id], onDelete: SetNull)
 
   translations CategoryTranslation[]
   products     ProductCategory[]
