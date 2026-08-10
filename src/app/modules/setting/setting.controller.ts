@@ -16,6 +16,9 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 			// deserves instead of a text box holding "true".
 			definitions: SettingService.SETTINGS,
 			groups: SettingService.SETTING_GROUPS,
+			// The menu's sections, in order. Sent rather than hardcoded on the
+			// screen, so moving a group between them is one edit here.
+			sections: SettingService.SETTING_SECTIONS,
 		},
 	})
 })

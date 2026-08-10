@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client"
 import { prisma } from "../../../shared/prisma"
-import { PUBLIC_KEYS, SETTINGS, SETTING_GROUPS } from "./settingRegistry"
+import { PUBLIC_KEYS, SETTINGS, SETTING_GROUPS, SETTING_SECTIONS } from "./settingRegistry"
 
 /**
  * Store settings.
@@ -15,9 +15,13 @@ import { PUBLIC_KEYS, SETTINGS, SETTING_GROUPS } from "./settingRegistry"
 export interface CompanyDetails {
 	name: string
 	street: string
+	/** Optional second line — a floor, a unit, a c/o. */
+	street2: string
 	postcode: string
 	city: string
 	countryCode: string
+	/** Only meaningful where tax differs within a country. */
+	state: string
 	vatId: string
 	registerNumber: string
 	email: string
@@ -51,9 +55,11 @@ const getCompany = async (): Promise<CompanyDetails> => {
 	return {
 		name: asString(map["company.name"]),
 		street: asString(map["company.street"]),
+		street2: asString(map["company.street2"]),
 		postcode: asString(map["company.postcode"]),
 		city: asString(map["company.city"]),
 		countryCode: asString(map["company.countryCode"]),
+		state: asString(map["company.state"]),
 		vatId: asString(map["company.vatId"]),
 		registerNumber: asString(map["company.registerNumber"]),
 		email: asString(map["company.email"]),
@@ -132,4 +138,5 @@ export const SettingService = {
 	remove,
 	SETTINGS,
 	SETTING_GROUPS,
+	SETTING_SECTIONS,
 }

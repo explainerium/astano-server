@@ -41,55 +41,135 @@ export interface SettingDefinition {
 	group: string
 }
 
-export const SETTING_GROUPS = [
-	{ key: "company", title: "Company", blurb: "Printed on invoices and in every email." },
-	{ key: "invoice", title: "Invoices", blurb: "How invoices are numbered and signed off." },
-	{ key: "mail", title: "Email", blurb: "Who transactional mail comes from and goes to." },
+/**
+ * The settings menu, in sections.
+ *
+ * Eleven groups in one flat list was a list to be read rather than navigated —
+ * "Units" and "Invoices" sat side by side with nothing to say which of them a
+ * question about VAT belonged near. The sections answer that: what the shop
+ * sells and how, versus who the business is, versus what a message looks like.
+ *
+ * `section` is a label, not a route. The URL is still /settings/<group>, so
+ * moving a group between sections cannot break a link.
+ */
+export const SETTING_SECTIONS = [
+	{ key: "shop", title: "Shop" },
+	{ key: "business", title: "Business" },
+	{ key: "email", title: "Email" },
+] as const
+
+export type SettingSection = (typeof SETTING_SECTIONS)[number]["key"]
+
+export const SETTING_GROUPS: {
+	key: string
+	title: string
+	blurb: string
+	section: SettingSection
+}[] = [
+	// ── Shop ───────────────────────────────────────────────────────────────
 	{
-		key: "email",
-		title: "Email appearance",
-		blurb: "The logo, colours and footer on every message the shop sends.",
+		key: "selling",
+		title: "Selling & shipping locations",
+		blurb: "Where the shop takes orders from, and where it delivers.",
+		section: "shop",
 	},
 	{
 		key: "currency",
-		title: "Currency & formatting",
+		title: "Currency",
 		blurb: "How every price on the site is written.",
-	},
-	{
-		key: "units",
-		title: "Units",
-		blurb: "Weights and dimensions, as entered and as shown.",
-	},
-	{
-		key: "stock",
-		title: "Stock",
-		blurb: "When to warn, and who to warn.",
+		section: "shop",
 	},
 	{
 		key: "cart",
 		title: "Cart & shop",
 		blurb: "What happens after adding to the basket, and how the grid is laid out.",
+		section: "shop",
 	},
 	{
-		key: "selling",
-		title: "Selling locations",
-		blurb: "Where the shop will take an order from.",
+		key: "stock",
+		title: "Stock",
+		blurb: "When to warn, and who to warn.",
+		section: "shop",
 	},
-	{ key: "pricing", title: "Pricing", blurb: "Which quantity ladder wins." },
+	{
+		key: "units",
+		title: "Units",
+		blurb: "Weights and dimensions, as entered and as shown.",
+		section: "shop",
+	},
+	{ key: "pricing", title: "Pricing", blurb: "Which quantity ladder wins.", section: "shop" },
 	{
 		key: "features",
 		title: "Features",
 		blurb: "Parts of the shop that can be switched off entirely.",
+		section: "shop",
+	},
+
+	// ── Business ───────────────────────────────────────────────────────────
+	{
+		key: "company",
+		title: "Business address",
+		blurb: "Printed on invoices and in every email. Tax and shipping are worked out from it.",
+		section: "business",
+	},
+	{
+		key: "invoice",
+		title: "Invoices",
+		blurb: "How invoices are numbered and signed off.",
+		section: "business",
+	},
+
+	// ── Email ──────────────────────────────────────────────────────────────
+	{
+		key: "mail",
+		title: "Sending",
+		blurb: "Who transactional mail comes from and goes to.",
+		section: "email",
+	},
+	{
+		key: "email",
+		title: "Appearance",
+		blurb: "The logo, colours and footer on every message the shop sends.",
+		section: "email",
 	},
 ]
 
 export const SETTINGS: Record<string, SettingDefinition> = {
 	// ── Company ────────────────────────────────────────────────────────────
 	"company.name": { label: "Legal entity on invoices", type: "text", fallback: "", group: "company" },
-	"company.street": { label: "Street address", type: "text", fallback: "", group: "company" },
+	"company.street": { label: "Address line 1", type: "text", fallback: "", group: "company" },
+	"company.street2": {
+		label: "Address line 2",
+		help: "Optional — a floor, a unit, a c/o line.",
+		type: "text",
+		fallback: "",
+		group: "company",
+	},
 	"company.postcode": { label: "Postcode", type: "text", fallback: "", group: "company" },
 	"company.city": { label: "City", type: "text", fallback: "", group: "company" },
-	"company.countryCode": { label: "ISO country code", type: "text", fallback: "DE", group: "company" },
+	/*
+	 * Country and state as two fields, where WooCommerce has one combined
+	 * picker. The pair is what the rest of the shop already reads — tax rates
+	 * match on an ISO country code, and a "DE:BY" string would have to be split
+	 * apart at every one of those points.
+	 */
+	"company.countryCode": {
+		label: "Country",
+		help: "Tax rates and shipping costs are worked out from this address.",
+		type: "country",
+		fallback: "DE",
+		// Public: the checkout preselects it, and it is printed on every invoice
+		// and in the imprint anyway. Nothing about it is private.
+		isPublic: true,
+		group: "company",
+	},
+	"company.state": {
+		label: "State or region",
+		help: "Optional. Only needed where tax differs within a country.",
+		type: "text",
+		fallback: "",
+		group: "company",
+	},
 	"company.vatId": { label: "VAT identification number", type: "text", fallback: "", group: "company" },
 	"company.registerNumber": { label: "Commercial register number", type: "text", fallback: "", group: "company" },
 	"company.email": {
@@ -173,33 +253,49 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 		isPublic: true,
 		group: "currency",
 	},
-	/**
-	 * A locale rather than four separate switches.
+	/*
+	 * Symbol position and the two separators, as WooCommerce has them.
 	 *
-	 * WooCommerce splits this into symbol position, thousands separator, decimal
-	 * separator and decimal count — four fields that can be combined into
-	 * nonsense. A locale is one choice that gets all four right, and Intl already
-	 * knows the conventions.
+	 * This replaced a single "Number format" locale picker. The locale was the
+	 * tidier idea — one choice that cannot produce a contradiction — but it is
+	 * the *same* decision as these three, and keeping both would have meant two
+	 * settings that disagree about how a price is written and no way to tell
+	 * which one the shop is actually using.
 	 *
-	 * The live shop is set to the US pattern (€1,234.56) on a German store, which
-	 * §3.1 flags as probably a misconfiguration. German is the default here; the
-	 * old behaviour is one selection away.
+	 * Given a choice between the tidy version and the one the client already
+	 * knows from WooCommerce, the familiar one wins: this is the screen they
+	 * have been configuring for years.
 	 */
-	"currency.locale": {
-		label: "Number format",
-		help: "German writes 1.234,56 € — the live WordPress shop is set to the English pattern, which §3.1 flags as likely a mistake.",
+	"currency.position": {
+		label: "Currency symbol position",
 		type: "select",
 		options: [
-			{ value: "de-DE", label: "German — 1.234,56 €" },
-			{ value: "en-GB", label: "English — €1,234.56" },
-			{ value: "fr-FR", label: "French — 1 234,56 €" },
+			{ value: "left", label: "Left — €1.234,56" },
+			{ value: "right", label: "Right — 1.234,56€" },
+			{ value: "left_space", label: "Left with a space — € 1.234,56" },
+			{ value: "right_space", label: "Right with a space — 1.234,56 €" },
 		],
-		fallback: "de-DE",
+		fallback: "right_space",
+		isPublic: true,
+		group: "currency",
+	},
+	"currency.thousandSeparator": {
+		label: "Thousands separator",
+		help: "German writes 1.234,56 — a full stop here and a comma below.",
+		type: "text",
+		fallback: ".",
+		isPublic: true,
+		group: "currency",
+	},
+	"currency.decimalSeparator": {
+		label: "Decimal separator",
+		type: "text",
+		fallback: ",",
 		isPublic: true,
 		group: "currency",
 	},
 	"currency.decimals": {
-		label: "Decimal places",
+		label: "Number of decimal places",
 		type: "number",
 		fallback: 2,
 		isPublic: true,
@@ -323,9 +419,56 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 		isPublic: true,
 		group: "selling",
 	},
+	/*
+	 * Where the shop will ship, which is not the same question as where it will
+	 * sell — and not the same question as the shipping zones either.
+	 *
+	 * This is a gate in front of the zones, not a second copy of them. A zone
+	 * says what delivery to a country costs; this says whether the country is
+	 * offered delivery at all. They only look alike until a shop sells a
+	 * download to everywhere and ships a pallet to two countries.
+	 */
+	"shipping.locations": {
+		label: "Ship to",
+		type: "select",
+		options: [
+			{ value: "selling", label: "Everywhere I sell to" },
+			{ value: "all", label: "All countries" },
+			{ value: "specific", label: "Only the countries listed below" },
+			{ value: "disabled", label: "Nowhere — no delivery at all" },
+		],
+		fallback: "selling",
+		isPublic: true,
+		group: "selling",
+	},
+	"shipping.countries": {
+		label: "Ship to these countries",
+		help: "Only used by “Only the countries listed below”. A country here still needs a shipping zone to have a rate.",
+		type: "countries",
+		fallback: [],
+		isPublic: true,
+		group: "selling",
+	},
+	/*
+	 * WooCommerce offers geolocation here as well. It is left out rather than
+	 * shown greyed out: it needs a GeoIP service this shop does not have, and a
+	 * setting that cannot do what it says is worse than one that is absent.
+	 */
+	"selling.customerDefault": {
+		label: "Preset location for customers",
+		type: "select",
+		options: [
+			{ value: "shop", label: "The shop's own country" },
+			{ value: "specific", label: "A country I choose below" },
+			{ value: "none", label: "No preset — the customer picks" },
+		],
+		fallback: "shop",
+		isPublic: true,
+		group: "selling",
+	},
 	"selling.defaultCountry": {
 		label: "Preselected country at checkout",
-		help: "Saves most customers a step. Leave blank to make them choose.",
+		help: "Only used by “A country I choose below”.",
 		type: "country",
 		fallback: "DE",
 		isPublic: true,
@@ -353,6 +496,14 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 	"coupons.enabled": {
 		label: "Accept coupon codes",
 		help: "Shows the coupon field at checkout. Nothing uses it until coupons are built.",
+		type: "boolean",
+		fallback: false,
+		isPublic: true,
+		group: "features",
+	},
+	"coupons.sequential": {
+		label: "Apply coupon discounts one after the other",
+		help: "With several coupons, the first comes off the full price and the next off what is left. Stored now, read when coupons are built.",
 		type: "boolean",
 		fallback: false,
 		isPublic: true,

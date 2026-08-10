@@ -66,7 +66,10 @@ export const renderLayout = ({
 
 	const footer = branding.footerText
 		? paragraphs(branding.footerText, "margin:0 0 6px;")
-		: `${escapeHtml(company.name)}${company.street ? ` · ${escapeHtml(company.street)}` : ""}${company.postcode || company.city ? ` · ${escapeHtml(`${company.postcode} ${company.city}`.trim())}` : ""}<br>
+		: `${[company.name, company.street, company.street2, `${company.postcode} ${company.city}`.trim()]
+				.filter((part) => part.trim())
+				.map(escapeHtml)
+				.join(" · ")}<br>
           ${company.vatId ? `VAT ${escapeHtml(company.vatId)} · ` : ""}${company.email ? escapeHtml(company.email) : ""}${company.phone ? ` · ${escapeHtml(company.phone)}` : ""}`
 
 	return `

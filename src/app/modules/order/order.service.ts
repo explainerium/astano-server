@@ -6,6 +6,7 @@ import { readBankAccounts } from "../../../domain/payment/bankAccounts"
 import { SettingService } from "../setting/setting.service"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
+import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
 import { availableOf, canTake, isLow, readStockRules } from "../../../domain/stock/availability"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
@@ -203,9 +204,16 @@ const quoteCart = async (params: QuoteParams) => {
 
 	const role = effectiveRole((params.role ?? null) as never, (params.status ?? null) as never)
 
-	// The same floor the cart and the product page applied, for the same reason
-	// the prices below are re-resolved rather than trusted.
-	const stockRules = readStockRules(await SettingService.getMap())
+	/*
+	 * One read for the whole quote.
+	 *
+	 * Stock floors, shipping locations and the tax switch are all settings, and
+	 * fetching them separately meant three round trips to say one thing about
+	 * the state of the shop — and, worse, three chances for a save mid-checkout
+	 * to be half-applied to the same basket.
+	 */
+	const settings = await SettingService.getMap()
+	const stockRules = readStockRules(settings)
 
 	// The same discounts the cart applied. Without this the basket would show
 	// one total and the invoice another.
@@ -326,7 +334,18 @@ const quoteCart = async (params: QuoteParams) => {
 	let chosenShipping: { id: string; code: string; title: string } | null = null
 	let shippingOptions: unknown[] = []
 
-	if (params.shippingCountry) {
+	/*
+	 * Checked before the zones are consulted, not instead of them.
+	 *
+	 * A zone says what delivery costs; this says whether it is offered at all.
+	 * Reading it here means a country the shop has switched off gets no options
+	 * even where a zone still claims it — which is the point of having the
+	 * setting, and stops the two disagreeing.
+	 */
+	const shippingRule = readShippingRule(settings)
+	const sellingRule = readSellingRule(settings)
+
+	if (params.shippingCountry && canShipTo(shippingRule, sellingRule, params.shippingCountry)) {
 		const zoneCountry = await prisma.shippingZoneCountry.findUnique({
 			where: { countryCode: params.shippingCountry.toUpperCase() },
 			include: {
@@ -416,7 +435,7 @@ const quoteCart = async (params: QuoteParams) => {
 	 * checkout must proceed. Routing this through resolveTax with no country
 	 * would produce the refusing state instead, which is why it is spelt out.
 	 */
-	const taxEnabled = (await SettingService.read<boolean>("tax.enabled")) !== false
+	const taxEnabled = settings["tax.enabled"] !== false
 
 	const tax = !taxEnabled
 		? { lines: [], totalTax: "0.00", reverseCharged: false, unconfigured: false }
@@ -569,11 +588,21 @@ const place = async (
 	 * not come from the site — and a selling restriction the server does not
 	 * enforce is a preference, not a rule.
 	 */
-	const selling = readSellingRule(await SettingService.getMap())
+	const placeSettings = await SettingService.getMap()
+	const selling = readSellingRule(placeSettings)
 
 	if (!canSellTo(selling, shippingAddress.countryCode)) {
 		throw new ApiError(httpStatus.CONFLICT, "We do not sell to that country", {
 			messageKey: "order.countryNotSold",
+		})
+	}
+
+	// Selling and shipping are separate answers, so both are asked. A country
+	// the shop sells to but does not deliver to has no shipping method, and
+	// without this the order would be refused for the wrong reason.
+	if (!canShipTo(readShippingRule(placeSettings), selling, shippingAddress.countryCode)) {
+		throw new ApiError(httpStatus.CONFLICT, "We do not deliver to that country", {
+			messageKey: "order.notDeliverable",
 		})
 	}
 

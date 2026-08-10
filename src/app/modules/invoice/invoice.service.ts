@@ -149,7 +149,18 @@ const renderHtml = (order: InvoiceOrder, company: CompanyDetails, locale: Locale
     <td style="vertical-align:top;">
       <div style="font-size:15px;font-weight:bold;">${esc(company.name)}</div>
       <div class="muted" style="margin-top:4px;line-height:1.5;">
-        ${esc(company.street)}<br>${esc(`${company.postcode} ${company.city}`)}<br>${esc(company.countryCode)}
+        ${[
+					company.street,
+					company.street2,
+					`${company.postcode} ${company.city}`.trim(),
+					// State on its own line only where one is set — most German
+					// addresses have none, and a blank line reads as a mistake.
+					company.state,
+					company.countryCode,
+				]
+					.filter((line) => line.trim())
+					.map(esc)
+					.join("<br>")}
       </div>
     </td>
     <td align="right" style="vertical-align:top;">
