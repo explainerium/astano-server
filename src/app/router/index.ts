@@ -13,6 +13,7 @@ import { AdminDashboardRoutes } from "../modules/dashboard/dashboard.routes"
 import { MediaRoutes } from "../modules/media/media.routes"
 import { AdminPricingRoutes } from "../modules/pricing/pricing.routes"
 import { AdminProductRoutes, ProductRoutes } from "../modules/product/product.routes"
+import { ProductIoRoutes } from "../modules/productIo/productIo.routes"
 import { AdminOrderRoutes, CheckoutRoutes, OrderRoutes } from "../modules/order/order.routes"
 import { PaymentRoutes } from "../modules/payment/payment.routes"
 import { AdminPaymentGatewayRoutes } from "../modules/paymentGateway/paymentGateway.routes"
@@ -52,6 +53,7 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/admin/attributes", route: AdminAttributeRoutes },
 	{ path: "/products", route: ProductRoutes },
 	{ path: "/admin/products", route: AdminProductRoutes },
+	{ path: "/admin/products-io", route: ProductIoRoutes },
 	{ path: "/admin/pricing", route: AdminPricingRoutes },
 	{ path: "/media", route: MediaRoutes },
 	{ path: "/cart", route: CartRoutes },
