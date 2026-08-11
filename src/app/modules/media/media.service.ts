@@ -151,7 +151,7 @@ const uploadImage = async (
  */
 const uploadFile = async (
 	file: { buffer: Buffer; mimetype: string; originalname: string; size: number },
-	opts: { locale: LocaleCode }
+	opts: { locale: LocaleCode; uploadedById?: string }
 ) => {
 	const extension = path.extname(file.originalname).toLowerCase()
 
@@ -185,6 +185,10 @@ const uploadFile = async (
 			mimeType: file.mimetype || "application/octet-stream",
 			sizeBytes: file.size,
 			originalName: file.originalname,
+			// Recorded so "may this customer attach this file" has an answer. Without
+			// it any signed-in account could quote another customer's asset id and
+			// pull their drawings onto its own order.
+			uploadedById: opts.uploadedById ?? null,
 		},
 		include: assetInclude,
 	})

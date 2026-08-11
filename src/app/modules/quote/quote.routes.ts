@@ -22,6 +22,15 @@ QuoteRoutes.use(optionalAuth)
 QuoteRoutes.get("/basket", QuoteController.getBasket)
 QuoteRoutes.post("/basket/items", validateRequest(QuoteValidation.addItemSchema), QuoteController.addItem)
 QuoteRoutes.patch("/basket/items/:id", validateRequest(QuoteValidation.updateItemSchema), QuoteController.updateItem)
+/**
+ * Artwork on a basket line.
+ *
+ * A guest may submit a quote but cannot attach a file: ownership of the upload
+ * is what stops one customer reading another's drawing, and a guest has no
+ * account to own it. The upload endpoint already requires sign-in, so this only
+ * states the same rule where it is felt.
+ */
+QuoteRoutes.put("/basket/items/:id/files", validateRequest(QuoteValidation.setFilesSchema), QuoteController.setBasketFiles)
 QuoteRoutes.delete("/basket/items/:id", validateRequest(QuoteValidation.itemIdSchema), QuoteController.removeItem)
 QuoteRoutes.delete("/basket", QuoteController.clearBasket)
 

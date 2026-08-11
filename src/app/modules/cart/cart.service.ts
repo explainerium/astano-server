@@ -13,6 +13,8 @@ import {
 } from "../../../domain/stock/availability"
 import { SettingService } from "../setting/setting.service"
 import { storage } from "../../../helpers/storage"
+import { ArtworkService } from "../media/artwork.service"
+import { checkArtwork, checkArtworkComplete, readArtworkRules } from "../../../domain/product/artwork"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { generateToken } from "../../../shared/token"
@@ -24,6 +26,10 @@ import { loadExternalTiers, type ExternalTiers } from "../product/tierSources"
 const cartInclude = {
 	items: {
 		include: {
+			files: {
+				include: { asset: { select: { id: true, originalName: true, sizeBytes: true, createdAt: true } } },
+				orderBy: { sortOrder: "asc" },
+			},
 			variant: {
 				include: {
 					prices: true,
@@ -43,6 +49,9 @@ const cartInclude = {
 
 type CartRow = Prisma.CartGetPayload<{ include: typeof cartInclude }>
 type ItemRow = CartRow["items"][number]
+
+const toArtworkFile = ArtworkService.toFile
+const refuseArtwork = ArtworkService.refuse
 
 const pick = <T extends { locale: string }>(rows: T[], locale: LocaleCode): T | undefined =>
 	rows.find((r) => r.locale === locale) ??
@@ -146,6 +155,13 @@ const view = (
 					quantity: i.quantity,
 					moq,
 					belowMoq: isBelowMoq(i.quantity, moq),
+					// The drawing this line is to be made from. Ordered as the customer
+					// arranged it — the first file is the one production opens first.
+					files: i.files.map((f) => toArtworkFile(f.asset)),
+					artwork: readArtworkRules(product),
+					// Flagged rather than refused: the cart is where the file is
+					// attached, so blocking the page would leave nowhere to fix it.
+					artworkMissing: checkArtworkComplete(readArtworkRules(product), i.files.length)?.kind === "REQUIRED",
 					inStock: canTake(i.variant, i.quantity, stockRules),
 					availableStock: availableOf(i.variant, stockRules),
 					unitPrice: price.unitPrice?.toFixed(2) ?? null,
@@ -171,6 +187,8 @@ const view = (
 	const issues: string[] = []
 	if (lines.some((l) => l.belowMoq || l.options.some((o) => o.belowMoq))) issues.push("BELOW_MOQ")
 	if (lines.some((l) => !l.inStock || l.options.some((o) => !o.inStock))) issues.push("OUT_OF_STOCK")
+	if (lines.some((l) => l.artworkMissing || l.options.some((o) => o.artworkMissing)))
+		issues.push("ARTWORK_REQUIRED")
 
 	return {
 		id: cart.id,
@@ -327,7 +345,13 @@ const get = async (owner: CartOwner, locale: LocaleCode) => {
 
 const addItem = async (
 	owner: CartOwner,
-	payload: { variantId: string; quantity: number; parentItemId?: string | null },
+	payload: {
+		variantId: string
+		quantity: number
+		parentItemId?: string | null
+		/** Design files, uploaded before the add and owned by the caller. */
+		assetIds?: string[]
+	},
 	locale: LocaleCode
 ) => {
 	const { cart, token } = await resolveCart(owner)
@@ -362,9 +386,21 @@ const addItem = async (
 		})
 	}
 
-	const existing = cart.items.find(
-		(i) => i.variantId === payload.variantId && i.parentItemId === (payload.parentItemId ?? null)
-	)
+	const assetIds = payload.assetIds ?? []
+
+	/*
+	 * Two of the same part cut to two different drawings are not the same line,
+	 * so an add carrying files never merges — and neither does a line that
+	 * already has some. Merging them would silently make one drawing win.
+	 */
+	const existing = assetIds.length
+		? undefined
+		: cart.items.find(
+				(i) =>
+					i.variantId === payload.variantId &&
+					i.parentItemId === (payload.parentItemId ?? null) &&
+					i.files.length === 0
+			)
 
 	const newQuantity = (existing?.quantity ?? 0) + payload.quantity
 
@@ -383,12 +419,19 @@ const addItem = async (
 			data: { quantity: newQuantity },
 		})
 	} else {
+		// Checked before the line exists, so a refusal leaves nothing behind.
+		refuseArtwork(checkArtwork(readArtworkRules(variant.product), assetIds.length))
+		const assets = await ArtworkService.assertOwned(assetIds, owner.userId)
+
 		await prisma.cartItem.create({
 			data: {
 				cartId: cart.id,
 				variantId: payload.variantId,
 				quantity: payload.quantity,
 				parentItemId: payload.parentItemId ?? null,
+				files: {
+					create: assets.map((asset, index) => ({ assetId: asset.id, sortOrder: index })),
+				},
 			},
 		})
 	}

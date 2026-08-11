@@ -126,6 +126,8 @@ model User {
   carts               Cart[]
   orders              Order[]
   orderNotes          OrderNote[]
+  /// Artwork this account uploaded. See Asset.uploadedBy.
+  assetsUploaded      Asset[]      @relation("AssetUploader")
   quoteBaskets        QuoteBasket[]
   quoteRequests       QuoteRequest[]
   wishlist            Wishlist?

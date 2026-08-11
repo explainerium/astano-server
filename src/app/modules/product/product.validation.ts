@@ -172,6 +172,15 @@ const productBody = z.object({
 		.enum(["SHOP_AND_SEARCH", "SHOP_ONLY", "SEARCH_ONLY", "HIDDEN"])
 		.default("SHOP_AND_SEARCH"),
 	quoteEnabled: z.boolean().default(false),
+	/**
+	 * How many design files a line of this product may carry, and whether it
+	 * can be ordered without one. 0 means the product does not offer artwork.
+	 *
+	 * Set for the made-to-order half of the catalogue — a cutter in the shape of
+	 * a logo has no specification other than the drawing.
+	 */
+	artworkMaxFiles: z.number().int().min(0).max(20).default(0),
+	artworkRequired: z.boolean().default(false),
 	/// Whether tax applies at all. The tax *class* decides the rate when it does.
 	taxStatus: z.enum(["TAXABLE", "SHIPPING_ONLY", "NONE"]).default("TAXABLE"),
 	moq: z.number().int().min(0).default(0),
@@ -212,6 +221,8 @@ export const updateProductSchema = z.object({
 			.enum(["SHOP_AND_SEARCH", "SHOP_ONLY", "SEARCH_ONLY", "HIDDEN"])
 			.optional(),
 		quoteEnabled: z.boolean().optional(),
+		artworkMaxFiles: z.number().int().min(0).max(20).optional(),
+		artworkRequired: z.boolean().optional(),
 		taxStatus: z.enum(["TAXABLE", "SHIPPING_ONLY", "NONE"]).optional(),
 		moq: z.number().int().min(0).optional(),
 		sortOrder: z.number().int().optional(),

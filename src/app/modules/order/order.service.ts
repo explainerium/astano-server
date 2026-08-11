@@ -7,6 +7,8 @@ import { SettingService } from "../setting/setting.service"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
 import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
+import { checkArtworkComplete, readArtworkRules } from "../../../domain/product/artwork"
+import { ArtworkService } from "../media/artwork.service"
 import { availableOf, canTake, isLow, readStockRules } from "../../../domain/stock/availability"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
@@ -52,6 +54,10 @@ const toPriceInputs = (
 const cartInclude = {
 	items: {
 		include: {
+			files: {
+				include: { asset: { select: { id: true, originalName: true } } },
+				orderBy: { sortOrder: "asc" },
+			},
 			variant: {
 				include: {
 					prices: true,
@@ -69,7 +75,7 @@ const cartInclude = {
 } satisfies Prisma.CartInclude
 
 const orderInclude = {
-	items: true,
+	items: { include: { files: { orderBy: { sortOrder: "asc" } } } },
 	addresses: true,
 	taxLines: true,
 	statusHistory: { orderBy: { createdAt: "asc" } },
@@ -141,6 +147,9 @@ const view = (row: OrderRow, opts: { staff?: boolean } = {}) => ({
 			quantity: i.quantity,
 			unitPrice: i.unitPrice.toFixed(2),
 			lineTotal: i.lineTotal.toFixed(2),
+			// What production is to make this from. assetId is null once the
+			// upload is deleted; the name stays so the order still records it.
+			files: i.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
 			options: row.items
 				.filter((o) => o.parentItemId === i.id)
 				.map((o) => ({
@@ -150,6 +159,7 @@ const view = (row: OrderRow, opts: { staff?: boolean } = {}) => ({
 					quantity: o.quantity,
 					unitPrice: o.unitPrice.toFixed(2),
 					lineTotal: o.lineTotal.toFixed(2),
+					files: o.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
 				})),
 		})),
 	taxLines: row.taxLines.map((t) => ({
@@ -282,6 +292,22 @@ const quoteCart = async (params: QuoteParams) => {
 				messageKey: "order.lineBelowMoq",
 				messageVars: { sku: label, moq: String(moq) },
 			})
+		}
+
+		/*
+		 * A cutter in the shape of a logo cannot be made from a blank. The form
+		 * asks for the file and the cart flags the line, but neither is what
+		 * keeps an unmakeable order out of production — this is.
+		 */
+		const artworkProblem = checkArtworkComplete(readArtworkRules(product), item.files.length)
+		if (artworkProblem) {
+			if (artworkProblem.kind === "REQUIRED") {
+				throw new ApiError(httpStatus.CONFLICT, "A line needs a file", {
+					messageKey: "order.lineArtworkRequired",
+					messageVars: { sku: label },
+				})
+			}
+			ArtworkService.refuse(artworkProblem)
 		}
 
 		if (!canTake(item.variant, item.quantity, stockRules)) {
@@ -701,6 +727,15 @@ const place = async (
 					unitPrice: line.unitPrice.toFixed(4),
 					lineTotal: line.lineTotal.toFixed(4),
 					weightKg: line.weightKg.toFixed(3),
+					// Frozen with the line. assetId goes null if the upload is ever
+					// deleted; the name stays, so the order still records what was sent.
+					files: {
+						create: line.item.files.map((f, index) => ({
+							assetId: f.assetId,
+							fileName: f.asset.originalName,
+							sortOrder: index,
+						})),
+					},
 				},
 			})
 			idMap.set(line.item.id, row.id)
@@ -723,6 +758,15 @@ const place = async (
 					unitPrice: line.unitPrice.toFixed(4),
 					lineTotal: line.lineTotal.toFixed(4),
 					weightKg: line.weightKg.toFixed(3),
+					// Frozen with the line. assetId goes null if the upload is ever
+					// deleted; the name stays, so the order still records what was sent.
+					files: {
+						create: line.item.files.map((f, index) => ({
+							assetId: f.assetId,
+							fileName: f.asset.originalName,
+							sortOrder: index,
+						})),
+					},
 					parentItemId: idMap.get(line.item.parentItemId!) ?? null,
 				},
 			})

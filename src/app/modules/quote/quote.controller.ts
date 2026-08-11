@@ -6,6 +6,7 @@ import { prisma } from "../../../shared/prisma"
 import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import { GUEST_BASKET_TTL_DAYS, QUOTE_BASKET_COOKIE } from "./quote.constant"
+import { ArtworkService } from "../media/artwork.service"
 import { QuoteService, type BasketOwner } from "./quote.service"
 import { clearCookieOptions, cookieOptions } from "../../../shared/cookies"
 
@@ -193,7 +194,22 @@ const adminUpdate: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+const setBasketFiles: RequestHandler = catchAsync(async (req, res) => {
+	const files = await ArtworkService.setBasketItemFiles(
+		req.params.id as string,
+		req.body.assetIds,
+		req.user?.sub
+	)
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("artwork.saved", req.locale),
+		data: files,
+	})
+})
+
 export const QuoteController = {
+	setBasketFiles,
 	getBasket,
 	addItem,
 	updateItem,

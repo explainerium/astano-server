@@ -5,6 +5,7 @@ import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import { CART_COOKIE, GUEST_CART_TTL_DAYS } from "./cart.constant"
 import { CartService, type CartOwner } from "./cart.service"
+import { ArtworkService } from "../media/artwork.service"
 import { clearCookieOptions, cookieOptions } from "../../../shared/cookies"
 
 const ownerOf = (req: Request): CartOwner => ({
@@ -93,4 +94,18 @@ const clear: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
-export const CartController = { get, addItem, updateItem, removeItem, clear }
+const setFiles: RequestHandler = catchAsync(async (req, res) => {
+	const files = await ArtworkService.setCartItemFiles(
+		req.params.id as string,
+		req.body.assetIds,
+		req.user?.sub
+	)
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("artwork.saved", req.locale),
+		data: files,
+	})
+})
+
+export const CartController = { get, addItem, updateItem, removeItem, clear, setFiles }

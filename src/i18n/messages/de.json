@@ -319,5 +319,12 @@
 	"email.bank.country": "Land",
 	"payment.builtIn": "Dies ist eine Standard-Zahlungsart — deaktivieren Sie sie, statt sie zu löschen.",
 	"payment.inUse": "Mit dieser Zahlungsart wurden Bestellungen bezahlt — deaktivieren Sie sie, statt sie zu löschen.",
-	"order.countryNotSold": "In dieses Land verkaufen wir derzeit nicht."
+	"order.countryNotSold": "In dieses Land verkaufen wir derzeit nicht.",
+	"artwork.saved": "Dateien aktualisiert.",
+	"artwork.signInRequired": "Melden Sie sich an, um eine Datei anzuhängen.",
+	"artwork.notYours": "Eine dieser Dateien wurde nicht gefunden.",
+	"artwork.notAccepted": "Für dieses Produkt können keine Dateien hochgeladen werden.",
+	"artwork.tooMany": "Für dieses Produkt sind höchstens {max} Datei(en) möglich.",
+	"artwork.required": "Für dieses Produkt wird mindestens eine Datei benötigt.",
+	"order.lineArtworkRequired": "Für {sku} wird eine Druckdatei benötigt."
 }

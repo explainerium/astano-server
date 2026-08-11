@@ -8,6 +8,7 @@ import { httpStatus } from "../../../shared/httpStatus"
 import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import ApiError from "../../errors/ApiError"
+import { ArtworkService } from "./artwork.service"
 import { MediaService } from "./media.service"
 
 const requireFile = (req: Request) => {
@@ -40,7 +41,7 @@ const uploadFile: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.CREATED,
 		message: t("media.uploaded", req.locale),
-		data: await MediaService.uploadFile(file, { locale: req.locale }),
+		data: await MediaService.uploadFile(file, { locale: req.locale, uploadedById: req.user?.sub }),
 	})
 })
 
@@ -74,7 +75,17 @@ const signedUrl: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
 		message: t("common.ok", req.locale),
-		data: { url: await MediaService.getSignedDownload(req.params.id as string) },
+		/*
+		 * Routed through the ownership check rather than straight to storage.
+		 * Any signed-in customer can send any asset id, and a competitor's
+		 * drawing is exactly the sort of thing worth guessing for.
+		 */
+		data: {
+			url: await ArtworkService.downloadUrl(req.params.id as string, {
+				userId: req.user?.sub,
+				isStaff: req.user?.role === "ADMIN" || req.user?.role === "SHOP_MANAGER",
+			}),
+		},
 	})
 })
 

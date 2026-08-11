@@ -7,6 +7,7 @@ import {
 	type RolePriceInput,
 } from "../../../domain/pricing/resolvePrice"
 import { getEffectiveMoq } from "../../../domain/moq/getEffectiveMoq"
+import { readArtworkRules } from "../../../domain/product/artwork"
 import {
 	availableOf,
 	DEFAULT_STOCK_RULES,
@@ -162,6 +163,8 @@ const toPublicProduct = (
 
 		quoteOnly: row.quoteEnabled,
 		moq: row.moq,
+		// What the storefront needs to decide whether to offer an upload box.
+		artwork: readArtworkRules(row),
 
 		featuredImage: toImage(row.featuredAsset),
 		images: row.assets.map((a) => toImage(a.asset)).filter(Boolean),
@@ -360,6 +363,8 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 		status: row.status,
 		visibility: row.visibility,
 		quoteEnabled: row.quoteEnabled,
+		artworkMaxFiles: row.artworkMaxFiles,
+		artworkRequired: row.artworkRequired,
 		taxStatus: row.taxStatus,
 		moq: row.moq,
 		sortOrder: row.sortOrder,
@@ -913,6 +918,8 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 			status: payload.status,
 			visibility: payload.visibility,
 			quoteEnabled: payload.quoteEnabled,
+			artworkMaxFiles: payload.artworkMaxFiles,
+			artworkRequired: payload.artworkRequired,
 			taxStatus: payload.taxStatus,
 			moq: payload.moq,
 			sortOrder: payload.sortOrder,
@@ -1016,6 +1023,8 @@ const duplicate = async (id: string, locale: LocaleCode, createdById?: string) =
 			status: "DRAFT",
 			visibility: row.visibility,
 			quoteEnabled: row.quoteEnabled,
+			artworkMaxFiles: row.artworkMaxFiles,
+			artworkRequired: row.artworkRequired,
 			taxStatus: row.taxStatus,
 			moq: row.moq,
 			sortOrder: row.sortOrder,
@@ -1110,6 +1119,8 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 				...(payload.status !== undefined ? { status: payload.status } : {}),
 				...(payload.visibility !== undefined ? { visibility: payload.visibility } : {}),
 				...(payload.quoteEnabled !== undefined ? { quoteEnabled: payload.quoteEnabled } : {}),
+				...(payload.artworkMaxFiles !== undefined ? { artworkMaxFiles: payload.artworkMaxFiles } : {}),
+				...(payload.artworkRequired !== undefined ? { artworkRequired: payload.artworkRequired } : {}),
 				...(payload.taxStatus !== undefined ? { taxStatus: payload.taxStatus } : {}),
 				...(payload.moq !== undefined ? { moq: payload.moq } : {}),
 				...(payload.sortOrder !== undefined ? { sortOrder: payload.sortOrder } : {}),

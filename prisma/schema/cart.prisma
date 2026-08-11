@@ -53,6 +53,9 @@ model CartItem {
   parentItem   CartItem?  @relation("OptionLines", fields: [parentItemId], references: [id], onDelete: Cascade)
   optionLines  CartItem[] @relation("OptionLines")
 
+  /// Artwork the customer attached to this line.
+  files CartItemFile[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

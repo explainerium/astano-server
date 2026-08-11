@@ -44,7 +44,7 @@ export interface ConvertInput {
 export const convertQuoteToOrder = async (input: ConvertInput) => {
 	const quote = await prisma.quoteRequest.findUnique({
 		where: { id: input.quoteId },
-		include: { items: true },
+		include: { items: { include: { files: { orderBy: { sortOrder: "asc" } } } } },
 	})
 
 	if (!quote) {
@@ -155,6 +155,16 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 						// The agreed price, not today's catalogue price.
 						unitPrice: i.quotedUnitPrice!.toString(),
 						lineTotal: i.quotedLineTotal!.toString(),
+						// The drawing follows the line onto the order. It was frozen once
+						// at submission; this copies that record rather than re-reading
+						// the upload, which may since have been deleted.
+						files: {
+							create: i.files.map((f, index) => ({
+								assetId: f.assetId,
+								fileName: f.fileName,
+								sortOrder: index,
+							})),
+						},
 					})),
 				},
 			},

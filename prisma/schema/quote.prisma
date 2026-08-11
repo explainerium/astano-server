@@ -69,6 +69,9 @@ model QuoteBasketItem {
   /// material preference, a deadline.
   note String?
 
+  /// The drawing that goes with the note. Most custom work starts here.
+  files QuoteBasketItemFile[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -153,6 +156,9 @@ model QuoteRequestItem {
   /// Staff fill these in when pricing the request. Null means unpriced.
   quotedUnitPrice Decimal? @db.Decimal(12, 4)
   quotedLineTotal Decimal? @db.Decimal(12, 4)
+
+  /// Frozen at submission, like everything else on this row.
+  files QuoteRequestItemFile[]
 
   @@index([quoteId])
   @@map("quote_request_items")

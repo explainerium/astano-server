@@ -52,6 +52,19 @@ model Asset {
   folderId String?
   folder   MediaFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
+  /// Who put this here.
+  ///
+  /// Null for the catalogue's own media, which predates the column and belongs
+  /// to the shop rather than to a person. Set on customer artwork, where it is
+  /// the only thing that makes "may this customer attach this file" answerable
+  /// — without it anyone signed in could quote another customer's asset id and
+  /// pull their drawings onto their own order.
+  ///
+  /// SetNull rather than Cascade: a deleted account must not take the artwork
+  /// off an order that has already been manufactured from it.
+  uploadedById String?
+  uploadedBy   User?   @relation("AssetUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
   translations     AssetTranslation[]
   products         ProductAsset[]
   featuredFor      Product[]        @relation("ProductFeatured")
@@ -59,12 +72,105 @@ model Asset {
   categoryIconFor  Category[]       @relation("CategoryIcon")
   variantImageFor  ProductVariant[] @relation("VariantImage")
 
+  cartLines       CartItemFile[]
+  quoteBasketLines QuoteBasketItemFile[]
+  orderLines      OrderItemFile[]
+  quoteLines      QuoteRequestItemFile[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([folderId])
   @@index([visibility])
+  @@index([uploadedById])
   @@map("assets")
+}
+
+/// Artwork a customer attached to a basket line.
+///
+/// The shop makes things to order — a cutter shaped like a logo, an engraving —
+/// so the drawing is part of what is being bought, not an afterthought. These
+/// follow the line: remove the line and the attachment goes with it, while the
+/// uploaded file itself stays in the customer's account.
+model CartItemFile {
+  cartItemId String
+  cartItem   CartItem @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+
+  assetId String
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@id([cartItemId, assetId])
+  @@index([assetId])
+  @@map("cart_item_files")
+}
+
+/// The same, for a line in the quote basket.
+///
+/// Separate from the cart's because the two baskets are separate: a quote-only
+/// product cannot be added to the cart at all (R2), and custom work is exactly
+/// what gets quoted — so this is where most artwork actually arrives.
+model QuoteBasketItemFile {
+  basketItemId String
+  basketItem   QuoteBasketItem @relation(fields: [basketItemId], references: [id], onDelete: Cascade)
+
+  assetId String
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@id([basketItemId, assetId])
+  @@index([assetId])
+  @@map("quote_basket_item_files")
+}
+
+/// Artwork as it stood when the order was placed.
+///
+/// Frozen like every other figure on an order. `fileName` is copied rather than
+/// read through the asset, so a file the customer later deletes from their
+/// account still shows on the order as something that was supplied — a blank
+/// where a drawing used to be is the one thing production must never see.
+model OrderItemFile {
+  id String @id @default(uuid())
+
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  /// Null once the underlying file is gone; the name and the record remain.
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  fileName  String
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderItemId])
+  @@map("order_item_files")
+}
+
+/// Artwork as it stood when the quote was submitted.
+model QuoteRequestItemFile {
+  id String @id @default(uuid())
+
+  quoteItemId String
+  quoteItem   QuoteRequestItem @relation(fields: [quoteItemId], references: [id], onDelete: Cascade)
+
+  assetId String?
+  asset   Asset?  @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  fileName  String
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([quoteItemId])
+  @@map("quote_request_item_files")
 }
 
 /// Only alt text and caption are translated — the binary is language-neutral.

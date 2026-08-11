@@ -5,6 +5,7 @@ export const addItemSchema = z.object({
 		variantId: z.string().uuid("A valid variant id is required"),
 		quantity: z.number().int().min(1).default(1),
 		note: z.string().trim().max(1000).optional(),
+		assetIds: z.array(z.string().uuid()).max(20).optional(),
 	}),
 })
 
@@ -76,7 +77,15 @@ export const quoteUpdateSchema = z.object({
 	}),
 })
 
+export const setFilesSchema = z.object({
+	params: z.object({ id: z.string().uuid() }),
+	body: z.object({
+		assetIds: z.array(z.string().uuid()).max(20).default([]),
+	}),
+})
+
 export const QuoteValidation = {
+	setFilesSchema,
 	addItemSchema,
 	updateItemSchema,
 	itemIdSchema,

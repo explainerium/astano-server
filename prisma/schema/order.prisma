@@ -196,6 +196,9 @@ model OrderItem {
   parentItem   OrderItem?  @relation("OrderOptionLines", fields: [parentItemId], references: [id], onDelete: Cascade)
   optionLines  OrderItem[] @relation("OrderOptionLines")
 
+  /// The artwork this line was made from, frozen at placement.
+  files OrderItemFile[]
+
   @@index([orderId])
   @@index([variantId])
   @@map("order_items")

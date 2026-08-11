@@ -23,6 +23,17 @@ router.patch(
 	CartController.updateItem
 )
 
+/**
+ * Artwork on a line. Signed in only — the file has to belong to somebody for
+ * "is this yours?" to have an answer, so a guest cannot attach one even though
+ * a guest may otherwise fill a cart.
+ */
+router.put(
+	"/items/:id/files",
+	validateRequest(CartValidation.setFilesSchema),
+	CartController.setFiles
+)
+
 router.delete(
 	"/items/:id",
 	validateRequest(CartValidation.itemIdSchema),

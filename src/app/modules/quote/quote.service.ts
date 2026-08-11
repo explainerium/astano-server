@@ -8,12 +8,20 @@ import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { generateToken, hashToken } from "../../../shared/token"
+import { checkArtwork, checkArtworkComplete, readArtworkRules } from "../../../domain/product/artwork"
+import { ArtworkService } from "../media/artwork.service"
 import ApiError from "../../errors/ApiError"
 import { GUEST_BASKET_TTL_DAYS } from "./quote.constant"
 
 const basketInclude = {
 	items: {
 		include: {
+			files: {
+				include: {
+					asset: { select: { id: true, originalName: true, sizeBytes: true, createdAt: true } },
+				},
+				orderBy: { sortOrder: "asc" },
+			},
 			variant: {
 				include: {
 					image: true,
@@ -29,7 +37,7 @@ const basketInclude = {
 type BasketRow = Prisma.QuoteBasketGetPayload<{ include: typeof basketInclude }>
 
 const quoteInclude = {
-	items: true,
+	items: { include: { files: { orderBy: { sortOrder: "asc" } } } },
 	messages: { orderBy: { createdAt: "asc" } },
 } satisfies Prisma.QuoteRequestInclude
 
@@ -61,25 +69,35 @@ const basketView = (basket: BasketRow, locale: LocaleCode) => {
 			image: image ? { id: image.id, url: storage.publicUrl(image.storageKey) } : null,
 			quantity: i.quantity,
 			note: i.note,
+			files: i.files.map((f) => ArtworkService.toFile(f.asset)),
 			moq,
 			belowMoq: isBelowMoq(i.quantity, moq),
 			/// No price is shown. That is the entire point of a quote basket —
 			/// these products have no price until a human sets one.
 			quoteOnly: product.quoteEnabled,
+			artwork: readArtworkRules(product),
+			/// Flagged here, refused at submit — see the gate in submit().
+			artworkMissing:
+				checkArtworkComplete(readArtworkRules(product), i.files.length)?.kind === "REQUIRED",
 		}
 	})
 
 	const belowMoq = items.some((i) => i.belowMoq)
+	const artworkMissing = items.some((i) => i.artworkMissing)
 
 	return {
 		id: basket.id,
 		items,
 		itemCount: items.reduce((n, i) => n + i.quantity, 0),
 		lineCount: items.length,
-		issues: belowMoq ? ["BELOW_MOQ"] : [],
+		issues: [
+			...(belowMoq ? ["BELOW_MOQ"] : []),
+			...(artworkMissing ? ["ARTWORK_REQUIRED"] : []),
+		],
 		/// R4: a line under its minimum BLOCKS submission — the third of the
-		/// three MOQ gates (add, update, submit).
-		submitReady: items.length > 0 && !belowMoq,
+		/// three MOQ gates (add, update, submit). A line missing a required
+		/// drawing blocks it too: nobody can price a shape they have not seen.
+		submitReady: items.length > 0 && !belowMoq && !artworkMissing,
 	}
 }
 
@@ -184,7 +202,7 @@ const getBasket = async (owner: BasketOwner, locale: LocaleCode) => {
 
 const addItem = async (
 	owner: BasketOwner,
-	payload: { variantId: string; quantity: number; note?: string },
+	payload: { variantId: string; quantity: number; note?: string; assetIds?: string[] },
 	locale: LocaleCode
 ) => {
 	const { basket, token } = await resolveBasket(owner)
@@ -214,7 +232,12 @@ const addItem = async (
 		})
 	}
 
-	const existing = basket.items.find((i) => i.variantId === payload.variantId)
+	const assetIds = payload.assetIds ?? []
+
+	// Same rule as the cart: a line carrying a drawing is its own line.
+	const existing = assetIds.length
+		? undefined
+		: basket.items.find((i) => i.variantId === payload.variantId && i.files.length === 0)
 
 	if (existing) {
 		await prisma.quoteBasketItem.update({
@@ -225,12 +248,18 @@ const addItem = async (
 			},
 		})
 	} else {
+		ArtworkService.refuse(checkArtwork(readArtworkRules(variant.product), assetIds.length))
+		const assets = await ArtworkService.assertOwned(assetIds, owner.userId)
+
 		await prisma.quoteBasketItem.create({
 			data: {
 				basketId: basket.id,
 				variantId: payload.variantId,
 				quantity: payload.quantity,
 				note: payload.note ?? null,
+				files: {
+					create: assets.map((asset, index) => ({ assetId: asset.id, sortOrder: index })),
+				},
 			},
 		})
 	}
@@ -326,6 +355,13 @@ const quoteView = (row: QuoteRow, opts: { staff?: boolean } = {}) => ({
 		quantity: i.quantity,
 		moq: i.moqAtSubmission,
 		note: i.note,
+		// Frozen at submission. assetId is null once the upload is deleted,
+		// but the record still says what was sent.
+		files: i.files.map((f) => ({
+			id: f.id,
+			assetId: f.assetId,
+			name: f.fileName,
+		})),
 		quotedUnitPrice: i.quotedUnitPrice?.toFixed(2) ?? null,
 		quotedLineTotal: i.quotedLineTotal?.toFixed(2) ?? null,
 	})),
@@ -381,6 +417,16 @@ const submit = async (
 				},
 			})
 		}
+
+		// A quote for a shape nobody has seen cannot be priced. Checked here
+		// rather than in the form because a basket may sit half-specified.
+		const artwork = checkArtworkComplete(
+			readArtworkRules(item.variant.product),
+			item.files.length
+		)
+		if (artwork) {
+			ArtworkService.refuse(artwork)
+		}
 	}
 
 	const contactName =
@@ -434,6 +480,13 @@ const submit = async (
 							variantMoq: item.variant.moq,
 						}),
 						note: item.note,
+						files: {
+							create: item.files.map((f, index) => ({
+								assetId: f.assetId,
+								fileName: f.asset.originalName,
+								sortOrder: index,
+							})),
+						},
 					})),
 				},
 				...(payload.message

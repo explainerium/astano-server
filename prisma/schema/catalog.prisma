@@ -140,6 +140,20 @@ model Product {
   /// Separate from the tax *class*, which decides the rate when it is taxed.
   taxStatus TaxStatus @default(TAXABLE)
 
+  /// How many drawings a customer may attach to this product, 0 for none.
+  ///
+  /// A count rather than a boolean plus a limit: "offered" and "how many" are
+  /// the same decision, and two fields let a product accept artwork with a
+  /// maximum of zero. The live shop allows six.
+  artworkMaxFiles Int @default(0)
+
+  /// Whether the line cannot be ordered without one.
+  ///
+  /// Enforced at placement, not only in the form — a cutter in the shape of a
+  /// logo cannot be made from a blank, and a request that skipped the page
+  /// should be refused rather than reach production.
+  artworkRequired Boolean @default(false)
+
   /// Which tax class applies. Null falls back to the class marked isDefault.
   taxClassId String?
   taxClass   TaxClass? @relation(fields: [taxClassId], references: [id], onDelete: SetNull)
