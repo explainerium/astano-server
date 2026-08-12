@@ -76,6 +76,12 @@ export const SETTING_GROUPS: {
 }[] = [
 	// ── Shop ───────────────────────────────────────────────────────────────
 	{
+		key: "language",
+		title: "Language",
+		blurb: "Which language a visitor sees first, and whether they may change it.",
+		section: "shop",
+	},
+	{
 		key: "selling",
 		title: "Selling & shipping locations",
 		blurb: "Where the shop takes orders from, and where it delivers.",
@@ -152,6 +158,56 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 	 * can render it: it used to be typed into the markup, which meant changing
 	 * the phone number here changed it on invoices and nowhere else.
 	 */
+	/*
+	 * WordPress calls this Site Language, and it means the same thing here: the
+	 * language a visitor gets when they have expressed no preference of their
+	 * own.
+	 *
+	 * It does not override a visitor who has chosen. A shop that forces German
+	 * on somebody who just clicked English has taken the switcher away and left
+	 * the button behind, which is worse than having neither.
+	 *
+	 * Distinct from DEFAULT_LOCALE in config/locales. That constant decides
+	 * which language is served *unprefixed* and is therefore a URL decision;
+	 * this decides which one an undecided visitor is sent to.
+	 */
+	"language.default": {
+		label: "Site language",
+		help: "What a first-time visitor sees. Anyone who picks a language keeps their choice.",
+		type: "select",
+		options: [
+			{ value: "de", label: "Deutsch" },
+			{ value: "en", label: "English" },
+		],
+		fallback: "de",
+		isPublic: true,
+		group: "language",
+	},
+	"language.showSwitcher": {
+		label: "Show the language switcher",
+		help: "Turn this off to run the shop in one language without offering the other.",
+		type: "boolean",
+		fallback: true,
+		isPublic: true,
+		group: "language",
+	},
+	/*
+	 * Browser-language detection, off by default.
+	 *
+	 * On, a visitor whose browser asks for English is sent there before they see
+	 * anything. That helps a shop with real English traffic and actively hurts
+	 * one whose customers are German with English-configured laptops — which
+	 * describes a good part of this trade.
+	 */
+	"language.detectFromBrowser": {
+		label: "Follow the browser language",
+		help: "Off means everyone starts in the site language above.",
+		type: "boolean",
+		fallback: false,
+		isPublic: true,
+		group: "language",
+	},
+
 	"company.name": { label: "Legal entity on invoices", type: "text", fallback: "", isPublic: true, group: "company" },
 	"company.street": { label: "Address line 1", type: "text", fallback: "", isPublic: true, group: "company" },
 	"company.street2": {
