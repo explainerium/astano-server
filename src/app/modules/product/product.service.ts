@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
+import { sanitizeRichText, stripHtml } from "../../../domain/html/sanitizeRichText"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import {
 	resolvePrice,
@@ -901,10 +902,10 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 			locale: t.locale,
 			name: t.name,
 			slug: await resolveSlug(t),
-			shortDescription: t.shortDescription ?? null,
-			description: t.description ?? null,
+			shortDescription: sanitizeRichText(t.shortDescription),
+			description: sanitizeRichText(t.description),
 			metaTitle: t.metaTitle ?? null,
-			metaDescription: t.metaDescription ?? null,
+			metaDescription: stripHtml(t.metaDescription),
 		}))
 	)
 
@@ -1139,18 +1140,18 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 					locale: t.locale,
 					name: t.name,
 					slug,
-					shortDescription: t.shortDescription ?? null,
-					description: t.description ?? null,
+					shortDescription: sanitizeRichText(t.shortDescription),
+					description: sanitizeRichText(t.description),
 					metaTitle: t.metaTitle ?? null,
-					metaDescription: t.metaDescription ?? null,
+					metaDescription: stripHtml(t.metaDescription),
 				},
 				update: {
 					name: t.name,
 					...(t.slug ? { slug } : {}),
-					shortDescription: t.shortDescription ?? null,
-					description: t.description ?? null,
+					shortDescription: sanitizeRichText(t.shortDescription),
+					description: sanitizeRichText(t.description),
 					metaTitle: t.metaTitle ?? null,
-					metaDescription: t.metaDescription ?? null,
+					metaDescription: stripHtml(t.metaDescription),
 				},
 			})
 		}

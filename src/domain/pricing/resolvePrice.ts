@@ -149,6 +149,33 @@ const pickRow = (
 	return null
 }
 
+/**
+ * The ladder to apply, which is not always the picked row's own.
+ *
+ * A price row and a quantity ladder are entered separately, so a role can
+ * easily have one without the other — a Retail price with no rungs is the
+ * common case, because the shop enters one ladder and expects every role to
+ * follow it. Without this, that customer is quoted the single-unit price at
+ * any quantity while a guest ordering the same 500 gets the discount.
+ *
+ * Falls back down the same chain as the price, and only when the row has no
+ * ladder at all. A role that defines even one rung has said what it wants.
+ */
+const pickTiers = (
+	rows: RolePriceInput[] | undefined,
+	row: RolePriceInput,
+	role: PricingRole
+): RolePriceInput["tiers"] => {
+	if (row.tiers?.length) return row.tiers
+
+	for (const candidate of FALLBACK[role]) {
+		const other = rows?.find((r) => r.role === candidate)
+		if (other?.tiers?.length) return other.tiers
+	}
+
+	return row.tiers
+}
+
 const saleActive = (row: RolePriceInput, now: Date): boolean => {
 	if (row.salePrice === null || row.salePrice === undefined) return false
 	if (row.saleStartsAt && now < row.saleStartsAt) return false
@@ -263,7 +290,8 @@ export const resolvePrice = (input: ResolvePriceInput): ResolvedPrice => {
 	 * pay for this product". Rungs never compound with one another either: only
 	 * one applies, and it applies to the base.
 	 */
-	const applied = pickTierBySource(input, row.tiers, quantity)
+	const ladder = pickTiers(source === "variant" ? input.variantPrices : input.productPrices, row, role)
+	const applied = pickTierBySource(input, ladder, quantity)
 	let unitPrice = applied ? applyTier(base, applied.tier) : base
 
 	// A percentage over 100 or an oversized fixed amount must not produce a

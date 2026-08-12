@@ -7,9 +7,11 @@
  *   3. add translation rows in the database
  * No module, route or service is touched.
  *
- * English is primary and is served at the site root. Every other locale is
- * served under its own prefix (German at /de/). If that decision is ever
- * reversed, change DEFAULT_LOCALE here — nothing else.
+ * German is primary and is served at the site root. Every other locale is
+ * served under its own prefix (English at /en/). astano is a German business
+ * with German customers and German SEO equity; English is the translation, not
+ * the other way round. If that is ever reversed, change DEFAULT_LOCALE here —
+ * nothing else.
  */
 
 export type LocaleCode = (typeof LOCALES)[number]["code"]
@@ -34,13 +36,6 @@ export interface LocaleDefinition {
 
 export const LOCALES = [
 	{
-		code: "en",
-		label: "English",
-		hreflang: "en",
-		intl: "en-GB",
-		slugReplacements: {},
-	},
-	{
 		code: "de",
 		label: "Deutsch",
 		hreflang: "de",
@@ -55,10 +50,17 @@ export const LOCALES = [
 			ß: "ss",
 		},
 	},
+	{
+		code: "en",
+		label: "English",
+		hreflang: "en",
+		intl: "en-GB",
+		slugReplacements: {},
+	},
 ] as const satisfies readonly LocaleDefinition[]
 
 /** Served at the root path. */
-export const DEFAULT_LOCALE: LocaleCode = "en"
+export const DEFAULT_LOCALE: LocaleCode = "de"
 
 export const SUPPORTED_LOCALES: readonly LocaleCode[] = LOCALES.map((l) => l.code)
 

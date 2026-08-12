@@ -23,8 +23,24 @@ const address = z.object({
 	email: z.string().trim().toLowerCase().email().optional(),
 })
 
+/**
+ * The billing address doubles as the contact for the order.
+ *
+ * Company, phone and email are required on it at the client's request: these
+ * are made-to-order goods, most of them for businesses, and a drawing that
+ * needs a question asked about it is worthless if nobody can be reached. The
+ * shipping address keeps them optional — a delivery address is a place, not a
+ * person, and asking for the same phone number twice is how a checkout loses
+ * people.
+ */
+const billingAddress = address.extend({
+	company: z.string().trim().min(1, "Company is required").max(200),
+	phone: z.string().trim().min(1, "Phone is required").max(50),
+	email: z.string().trim().toLowerCase().email(),
+})
+
 const checkoutBody = z.object({
-	billingAddress: address,
+	billingAddress,
 	/// Omitted means "ship to the billing address".
 	shippingAddress: address.optional(),
 	shippingMethodId: z.string().uuid().optional(),

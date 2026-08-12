@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client"
 import type { LocaleCode } from "../../../config/locales"
 import { DEFAULT_LOCALE } from "../../../config/locales"
+import { sanitizeRichText, stripHtml } from "../../../domain/html/sanitizeRichText"
 import { toPublicAsset, type PublicAsset } from "../../../domain/media/publicAsset"
 import { copyNameFor } from "../../../shared/duplicate"
 import { httpStatus } from "../../../shared/httpStatus"
@@ -216,9 +217,9 @@ const create = async (
 			locale: t.locale,
 			name: t.name,
 			slug: await resolveSlug(t),
-			description: t.description ?? null,
+			description: sanitizeRichText(t.description),
 			metaTitle: t.metaTitle ?? null,
-			metaDescription: t.metaDescription ?? null,
+			metaDescription: stripHtml(t.metaDescription),
 		}))
 	)
 
@@ -306,16 +307,16 @@ const update = async (
 					locale: t.locale,
 					name: t.name,
 					slug,
-					description: t.description ?? null,
+					description: sanitizeRichText(t.description),
 					metaTitle: t.metaTitle ?? null,
-					metaDescription: t.metaDescription ?? null,
+					metaDescription: stripHtml(t.metaDescription),
 				},
 				update: {
 					name: t.name,
 					...(t.slug ? { slug } : {}),
-					description: t.description ?? null,
+					description: sanitizeRichText(t.description),
 					metaTitle: t.metaTitle ?? null,
-					metaDescription: t.metaDescription ?? null,
+					metaDescription: stripHtml(t.metaDescription),
 				},
 			})
 		}

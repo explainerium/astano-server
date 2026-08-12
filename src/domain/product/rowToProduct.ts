@@ -1,3 +1,5 @@
+import { sanitizeRichText } from "../html/sanitizeRichText"
+import { cleanRichText } from "./cleanRichText"
 import {
 	findAttributeColumns,
 	readBackorders,
@@ -158,8 +160,12 @@ export const parseRow = (
 	return {
 		sku,
 		name,
-		description: raw("description") || null,
-		shortDescription: raw("shortDescription") || null,
+		// Cleaned on the way in. WooCommerce exports carry their newlines escaped,
+		// and in HTML an escaped newline renders as visible text mid-paragraph.
+		// Sanitised here, not only in the service: the importer writes these
+		// straight to the database, and the dry-run preview shows this value.
+		description: sanitizeRichText(cleanRichText(raw("description"))),
+		shortDescription: sanitizeRichText(cleanRichText(raw("shortDescription"))),
 		status: guarded("status", readStatus, "Published"),
 		visibility: guarded("visibility", readVisibility, "Visibility"),
 		/*
