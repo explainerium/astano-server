@@ -6,6 +6,7 @@ import { signAccessToken } from "../../../shared/jwtHelper"
 import { logger } from "../../../shared/logger"
 import { prisma } from "../../../shared/prisma"
 import { durationToMs, generateToken, hashToken } from "../../../shared/token"
+import { decideRefresh } from "../../../domain/auth/refreshDecision"
 import ApiError from "../../errors/ApiError"
 import type { LocaleCode } from "../../../config/locales"
 import { sendAccountWelcome, sendPasswordReset } from "../../../helpers/mailer"
@@ -204,7 +205,30 @@ const refresh = async (token: string, device: DeviceInfo): Promise<AuthResult> =
 		messageKey: "auth.invalidToken",
 	})
 
-	if (!stored || stored.revokedAt || stored.expiresAt < new Date()) throw invalid
+	// Checked here as well as inside decideRefresh, so everything below can rely
+	// on the row existing.
+	if (!stored) throw invalid
+
+	const decision = decideRefresh(stored)
+
+	if (decision.kind === "INVALID") throw invalid
+
+	/*
+	 * A token presented long after it was spent means a copy of it exists
+	 * somewhere it should not. Refusing this one request would leave the copy
+	 * working on the next; closing every session the account holds is the whole
+	 * point of rotating in the first place.
+	 */
+	if (decision.kind === "REUSE") {
+		logger.warn({ userId: stored.userId }, "Refresh token reuse — revoking every session")
+
+		await prisma.refreshToken.updateMany({
+			where: { userId: stored.userId, revokedAt: null },
+			data: { revokedAt: new Date() },
+		})
+
+		throw invalid
+	}
 
 	/*
 	 * The status is re-read here, and this is the moment a staff decision
@@ -220,10 +244,12 @@ const refresh = async (token: string, device: DeviceInfo): Promise<AuthResult> =
 	if (stored.user.deletedAt) throw invalid
 	if (stored.user.status === "REJECTED" || stored.user.status === "DRAFT") throw invalid
 
-	await prisma.refreshToken.update({
-		where: { id: stored.id },
-		data: { revokedAt: new Date() },
-	})
+	if (decision.kind === "ROTATE") {
+		await prisma.refreshToken.update({
+			where: { id: stored.id },
+			data: { revokedAt: new Date() },
+		})
+	}
 
 	return issueTokens(stored.user, device)
 }
