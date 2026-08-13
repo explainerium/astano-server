@@ -168,6 +168,7 @@ model Product {
   attributes   ProductAttribute[]
   prices       ProductPrice[]
   priceTiers   ProductPriceTier[]
+  tabs         ProductTab[]
 
   /// Option products offered on this product's page.
   options ProductOption[] @relation("OptionOwner")
@@ -203,6 +204,48 @@ model Product {
   // apply the SetNull.
   @@index([createdById])
   @@map("products")
+}
+
+/// A tab the shop writes itself, shown on the product page after Description
+/// and Additional information.
+///
+/// The live shop has exactly two tabs and no way to add a third, so anything
+/// that does not fit either — care instructions, a size chart, delivery times —
+/// gets pushed into the description and reads as an afterthought.
+///
+/// The order lives on the tab rather than on its translations, so German and
+/// English cannot disagree about which tab comes first. The words live on the
+/// translations, so they can.
+model ProductTab {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  sortOrder Int @default(0)
+
+  translations ProductTabTranslation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId, sortOrder])
+  @@map("product_tabs")
+}
+
+model ProductTabTranslation {
+  id    String     @id @default(uuid())
+  tabId String
+  tab   ProductTab @relation(fields: [tabId], references: [id], onDelete: Cascade)
+
+  locale String
+
+  /// The strip label. A tab with no title in a locale is not shown there.
+  title String
+  /// Rich text, sanitised on the way in like every other authored field.
+  content String?
+
+  @@unique([tabId, locale])
+  @@map("product_tab_translations")
 }
 
 model ProductTranslation {

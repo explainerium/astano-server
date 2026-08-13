@@ -20,6 +20,26 @@ const translation = z.object({
 	metaDescription: z.string().trim().max(500).optional(),
 })
 
+/**
+ * A tab the shop writes itself, shown on the product page.
+ *
+ * The list is unbounded on purpose — the point of the feature is that two
+ * fixed tabs were not enough. The per-tab limits are what keep a runaway paste
+ * out of the database.
+ */
+const productTab = z.object({
+	sortOrder: z.number().int().min(0).optional(),
+	translations: z
+		.array(
+			z.object({
+				locale,
+				title: z.string().trim().max(120),
+				content: z.string().trim().max(50000).optional().nullable(),
+			})
+		)
+		.min(1),
+})
+
 /** One rung of a quantity ladder. Admins may add as many as they like. */
 const tier = z.object({
 	role: priceRole,
@@ -194,6 +214,7 @@ const productBody = z.object({
 	prices: z.array(price).default([]),
 	tiers: z.array(tier).default([]),
 	options: z.array(option).default([]),
+	tabs: z.array(productTab).default([]),
 })
 
 export const createProductSchema = z.object({ body: productBody })
@@ -236,6 +257,7 @@ export const updateProductSchema = z.object({
 		prices: z.array(price).optional(),
 		tiers: z.array(tier).optional(),
 		options: z.array(option).optional(),
+		tabs: z.array(productTab).optional(),
 	}),
 })
 

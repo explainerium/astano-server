@@ -27,12 +27,19 @@ import ApiError from "../../errors/ApiError"
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
+/** One tab as the editor sends it. */
+interface TabInput {
+	sortOrder?: number
+	translations: { locale: string; title: string; content?: string | null }[]
+}
+
 const detailInclude = {
 	// A select, not `true`. The relation is a full user row — password hash,
 	// VAT number, consent timestamps — and this one is serialised straight into
 	// an admin list response. Only the three fields a name is built from.
 	createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
 	translations: true,
+	tabs: { include: { translations: true }, orderBy: { sortOrder: "asc" } },
 	categories: { include: { category: { include: { translations: true } } } },
 	attributes: true,
 	prices: true,
@@ -161,6 +168,21 @@ const toPublicProduct = (
 		description: t?.description ?? null,
 		metaTitle: t?.metaTitle ?? null,
 		metaDescription: t?.metaDescription ?? null,
+
+		/**
+		 * The shop's own tabs, after Description and Additional information.
+		 *
+		 * A tab with no title in this locale is dropped rather than shown with
+		 * the other language's heading — a German page with an English tab label
+		 * reads worse than one tab fewer. Content may be empty: a tab that is
+		 * only a heading is a mistake, and hiding it says so.
+		 */
+		tabs: row.tabs
+			.map((tab) => {
+				const tt = pickTranslation(tab.translations, locale)
+				return { id: tab.id, title: tt?.title ?? "", content: tt?.content ?? null }
+			})
+			.filter((tab) => tab.title.trim() !== "" && (tab.content ?? "").trim() !== ""),
 
 		quoteOnly: row.quoteEnabled,
 		moq: row.moq,
@@ -364,6 +386,15 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 		status: row.status,
 		visibility: row.visibility,
 		quoteEnabled: row.quoteEnabled,
+		tabs: row.tabs.map((tab) => ({
+			id: tab.id,
+			sortOrder: tab.sortOrder,
+			translations: tab.translations.map((tt) => ({
+				locale: tt.locale,
+				title: tt.title,
+				content: tt.content,
+			})),
+		})),
 		artworkMaxFiles: row.artworkMaxFiles,
 		artworkRequired: row.artworkRequired,
 		taxStatus: row.taxStatus,
@@ -926,6 +957,18 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 			sortOrder: payload.sortOrder,
 			featuredAssetId: payload.featuredAssetId ?? null,
 			translations: { create: translations },
+			tabs: {
+				create: (payload.tabs ?? []).map((tab: TabInput, index: number) => ({
+					sortOrder: tab.sortOrder ?? index,
+					translations: {
+						create: tab.translations.map((tt) => ({
+							locale: tt.locale,
+							title: tt.title,
+							content: sanitizeRichText(tt.content),
+						})),
+					},
+				})),
+			},
 			categories: {
 				create: (payload.categoryIds ?? []).map((categoryId: string) => ({ categoryId })),
 			},
@@ -1202,6 +1245,34 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 			await tx.productPriceTier.createMany({
 				data: payload.tiers.map((t: any) => ({ ...t, productId: id })),
 			})
+		}
+
+		/*
+		 * Replaced wholesale, like the other collections on this form.
+		 *
+		 * Diffing would let a tab keep its id across a save, which matters for
+		 * nothing here: nothing else references a tab, and the editor sends the
+		 * whole list every time. Deleting and rewriting is the honest reading of
+		 * "these are the tabs now".
+		 */
+		if (payload.tabs) {
+			await tx.productTab.deleteMany({ where: { productId: id } })
+
+			for (const [index, tab] of (payload.tabs as TabInput[]).entries()) {
+				await tx.productTab.create({
+					data: {
+						productId: id,
+						sortOrder: tab.sortOrder ?? index,
+						translations: {
+							create: tab.translations.map((tt) => ({
+								locale: tt.locale,
+								title: tt.title,
+								content: sanitizeRichText(tt.content),
+							})),
+						},
+					},
+				})
+			}
 		}
 
 		if (payload.options) {
