@@ -13,6 +13,7 @@ import {
 	IMAGE_DERIVATIVES,
 	MAX_FILE_BYTES,
 	MAX_IMAGE_BYTES,
+	megabytes,
 	SIGNED_URL_TTL_SECONDS,
 	UNFILED,
 	WEBP_QUALITY,
@@ -77,7 +78,7 @@ const uploadImage = async (
 	if (file.size > MAX_IMAGE_BYTES) {
 		throw new ApiError(httpStatus.PAYLOAD_TOO_LARGE, "Image too large", {
 			messageKey: "media.tooLarge",
-			messageVars: { limit: "10 MB" },
+			messageVars: { limit: megabytes(MAX_IMAGE_BYTES) },
 		})
 	}
 
@@ -165,7 +166,7 @@ const uploadFile = async (
 	if (file.size > MAX_FILE_BYTES) {
 		throw new ApiError(httpStatus.PAYLOAD_TOO_LARGE, "File too large", {
 			messageKey: "media.tooLarge",
-			messageVars: { limit: "50 MB" },
+			messageVars: { limit: megabytes(MAX_FILE_BYTES) },
 		})
 	}
 

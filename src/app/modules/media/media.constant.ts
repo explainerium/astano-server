@@ -35,7 +35,25 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
  */
 export const UNFILED = "none"
 
-export const MAX_FILE_BYTES = 50 * 1024 * 1024
+/**
+ * The ceiling on a customer's design file.
+ *
+ * Ten, not the fifty it was. A cutting drawing is vectors — a PDF or a DXF of a
+ * logo is measured in kilobytes — so anything approaching this is a scan or a
+ * render that production cannot use anyway, and accepting it only means a slow
+ * upload on a phone and a large object nobody opens.
+ */
+export const MAX_FILE_BYTES = 10 * 1024 * 1024
+
+/**
+ * A limit as text, derived rather than typed.
+ *
+ * The number is quoted in the error the customer sees and in the hint under the
+ * upload button. A hand-written "50 MB" beside a constant that has since
+ * changed is a lie no test can catch, and this file has carried one.
+ */
+export const megabytes = (bytes: number): string =>
+	`${Math.round(bytes / (1024 * 1024))} MB`
 
 export const ALLOWED_IMAGE_TYPES = [
 	"image/jpeg",

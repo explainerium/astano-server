@@ -123,16 +123,49 @@ export interface ResolvedPrice {
 }
 
 /**
- * Fallback order when the requested role has no price row.
+ * Fallback order when the requested role has nothing of its own.
  *
  * Always falls back toward the MORE expensive role. Charging a Reseller the
  * B2C price because nobody entered a wholesale price is a visible annoyance;
  * charging a guest the Reseller price is lost revenue nobody notices.
+ *
+ * Exported because it governs more than the rows in this file. The shop enters
+ * one ladder and expects everyone to follow it, so anything that picks a ladder
+ * by role — including the category ladders loaded before this function ever
+ * runs — has to walk the same chain. Two chains would be two answers to "what
+ * does a signed-in retail customer pay", and only one of them would be right.
  */
-const FALLBACK: Record<PricingRole, PricingRole[]> = {
+export const ROLE_FALLBACK: Record<PricingRole, PricingRole[]> = {
 	RESELLER: ["RESELLER", "B2C", "GUEST"],
 	B2C: ["B2C", "GUEST"],
 	GUEST: ["GUEST", "B2C"],
+}
+
+const FALLBACK = ROLE_FALLBACK
+
+/**
+ * The rows belonging to the most specific role in the chain that has any.
+ *
+ * All of one role's rows or none of them, never a mixture. Merging a category's
+ * guest and reseller rungs together would let a guest rung undercut the
+ * reseller one that was meant to replace it — the ladders are alternatives, not
+ * layers.
+ *
+ * Lives here rather than beside its one caller because it *is* the fallback
+ * rule, and the rule having a second implementation somewhere else is how a
+ * signed-in retail customer ends up paying a different price on the product
+ * page than in the cart.
+ */
+export const pickByRole = <T extends { role: PricingRole }>(
+	rows: readonly T[],
+	role: PricingRole
+): T[] => {
+	for (const candidate of ROLE_FALLBACK[role]) {
+		const found = rows.filter((row) => row.role === candidate)
+		if (found.length) return found
+	}
+
+	return []
 }
 
 const pickRow = (

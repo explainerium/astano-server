@@ -5,12 +5,24 @@ import { t } from "../../i18n"
 import { httpStatus } from "../../shared/httpStatus"
 import { logger } from "../../shared/logger"
 import ApiError from "../errors/ApiError"
+import { MAX_FILE_BYTES, megabytes } from "../modules/media/media.constant"
 import { translatePrismaError } from "../errors/prismaError"
 
 interface ErrorDetail {
 	path: string
 	message: string
 }
+
+/**
+ * multer's own size refusal.
+ *
+ * Matched by shape rather than with `instanceof MulterError`, so this file does
+ * not have to import multer to describe what one of its errors looks like.
+ */
+const isFileTooLarge = (error: unknown): boolean =>
+	typeof error === "object" &&
+	error !== null &&
+	(error as { code?: unknown }).code === "LIMIT_FILE_SIZE"
 
 export const globalErrorHandler = (
 	error: unknown,
@@ -34,6 +46,15 @@ export const globalErrorHandler = (
 		message = error.messageKey
 			? t(error.messageKey, req.locale, error.messageVars)
 			: error.message
+	} else if (isFileTooLarge(error)) {
+		/*
+		 * multer aborts an oversized upload while it is still streaming, so the
+		 * service that would have said "too large" never runs. Without this the
+		 * customer is told the server broke, which is both untrue and unhelpful:
+		 * the file is too big and they can do something about that.
+		 */
+		statusCode = httpStatus.PAYLOAD_TOO_LARGE
+		message = t("media.tooLarge", req.locale, { limit: megabytes(MAX_FILE_BYTES) })
 	} else {
 		const prisma = translatePrismaError(error)
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolvePrice } from "../../src/domain/pricing/resolvePrice"
+import { pickByRole, resolvePrice } from "../../src/domain/pricing/resolvePrice"
 
 /**
  * The client's complaint was that filling three quantity ladders is too much
@@ -84,5 +84,46 @@ describe("quantity ladder fallback", () => {
 		})
 
 		expect(result.unitPrice?.toFixed(2)).toBe("10.00")
+	})
+})
+
+/**
+ * The same rule, applied one layer earlier.
+ *
+ * Category ladders are fetched by role *before* resolvePrice sees them, so an
+ * exact-role query left a signed-in retail customer with an empty list and no
+ * discount — while a guest, on the very same category, got one. resolvePrice
+ * could not repair it: nothing distinguishes "no category ladder" from "a
+ * category ladder we filtered away".
+ */
+describe("pickByRole", () => {
+	const rows = [
+		{ role: "GUEST" as const, minQuantity: 100 },
+		{ role: "GUEST" as const, minQuantity: 500 },
+		{ role: "RESELLER" as const, minQuantity: 100 },
+	]
+
+	it("gives a retail customer the guest rows when they have none of their own", () => {
+		expect(pickByRole(rows, "B2C").map((r) => r.role)).toEqual(["GUEST", "GUEST"])
+	})
+
+	it("prefers the role's own rows over the fallback", () => {
+		const withB2C = [...rows, { role: "B2C" as const, minQuantity: 250 }]
+		expect(pickByRole(withB2C, "B2C")).toEqual([{ role: "B2C", minQuantity: 250 }])
+	})
+
+	it("takes one role's rows or none, never a mixture", () => {
+		// A guest rung merged in beside the reseller's would undercut the rung it
+		// was meant to be replaced by.
+		expect(pickByRole(rows, "RESELLER")).toEqual([{ role: "RESELLER", minQuantity: 100 }])
+	})
+
+	it("never lets a guest reach the dealer's rows", () => {
+		const dealerOnly = [{ role: "RESELLER" as const, minQuantity: 100 }]
+		expect(pickByRole(dealerOnly, "GUEST")).toEqual([])
+	})
+
+	it("returns nothing when there is nothing", () => {
+		expect(pickByRole([], "B2C")).toEqual([])
 	})
 })

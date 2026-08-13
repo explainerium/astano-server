@@ -1,5 +1,11 @@
 import type { PriceRole } from "@prisma/client"
-import { DEFAULT_TIER_PRIORITY, type TierInput, type TierSource } from "../../../domain/pricing/resolvePrice"
+import {
+	DEFAULT_TIER_PRIORITY,
+	ROLE_FALLBACK,
+	pickByRole,
+	type TierInput,
+	type TierSource,
+} from "../../../domain/pricing/resolvePrice"
 import type { PricingRole } from "../../../domain/pricing/effectiveRole"
 import { prisma } from "../../../shared/prisma"
 
@@ -62,6 +68,13 @@ export const loadTierPriority = async (): Promise<TierSource[]> => {
  * highest threshold the quantity reaches wins, so merging simply means the
  * deeper of two overlapping discounts applies rather than whichever category
  * happened to be listed first.
+ *
+ * The role falls back the way every other ladder does. Asking for the exact
+ * role and nothing else meant a signed-in retail customer got no category
+ * discount at all where the shop had entered one ladder for guests — which is
+ * the whole shop, because entering the same ladder three times is exactly what
+ * the client asked not to have to do. `resolvePrice` cannot repair that later:
+ * by then these rows have already been filtered to a role and come back empty.
  */
 export const loadCategoryTiers = async (
 	productIds: string[],
@@ -76,20 +89,30 @@ export const loadCategoryTiers = async (
 	})
 	if (!links.length) return byProduct
 
+	const chain = ROLE_FALLBACK[role]
+
 	const tiers = await prisma.categoryPriceTier.findMany({
 		where: {
 			categoryId: { in: [...new Set(links.map((l) => l.categoryId))] },
-			role: role as PriceRole,
+			role: { in: chain as PriceRole[] },
 		},
 		orderBy: { minQuantity: "asc" },
 	})
 	if (!tiers.length) return byProduct
 
+	/*
+	 * Resolved per category, not across all of them: one category may carry a
+	 * Reseller ladder while the next carries only a guest one, and a reseller
+	 * buying from both should get each category's best answer rather than have
+	 * the more specific category decide for the other.
+	 */
 	const byCategory = new Map<string, TierInput[]>()
-	for (const tier of tiers) {
-		const list = byCategory.get(tier.categoryId) ?? []
-		list.push(toTierInput(tier))
-		byCategory.set(tier.categoryId, list)
+	for (const categoryId of new Set(tiers.map((tier) => tier.categoryId))) {
+		const rows = pickByRole(
+			tiers.filter((tier) => tier.categoryId === categoryId),
+			role
+		)
+		if (rows.length) byCategory.set(categoryId, rows.map(toTierInput))
 	}
 
 	for (const link of links) {

@@ -190,6 +190,8 @@ const view = (
 	if (lines.some((l) => l.artworkMissing || l.options.some((o) => o.artworkMissing)))
 		issues.push("ARTWORK_REQUIRED")
 
+	const blocking = issues.filter((issue) => issue !== "ARTWORK_REQUIRED")
+
 	return {
 		id: cart.id,
 		items: lines,
@@ -199,7 +201,16 @@ const view = (
 		currency: "EUR",
 		/// Flags the frontend must act on before allowing checkout.
 		issues,
-		checkoutReady: issues.length === 0 && lines.length > 0,
+		/**
+		 * A missing drawing is reported but does not hold anyone back.
+		 *
+		 * The upload field lives on the checkout page — the client asked for it
+		 * there rather than here — so refusing to let the customer reach checkout
+		 * would leave them with nowhere to fix what they are being told to fix.
+		 * Nothing is lost by letting them through: `place` re-checks every line
+		 * and refuses the order outright if a file is still missing.
+		 */
+		checkoutReady: blocking.length === 0 && lines.length > 0,
 	}
 }
 

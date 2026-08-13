@@ -8,6 +8,7 @@ import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
 import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
 import { checkArtworkComplete, readArtworkRules } from "../../../domain/product/artwork"
+import { rememberAddresses } from "./rememberAddress"
 import { ArtworkService } from "../media/artwork.service"
 import { availableOf, canTake, isLow, readStockRules } from "../../../domain/stock/availability"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
@@ -796,6 +797,20 @@ const place = async (
 
 	const full = await prisma.order.findUnique({ where: { id: order.id }, include: orderInclude })
 	const result = view(full!)
+
+	/*
+	 * Stock the address book from the order, so the next checkout fills itself
+	 * in. Outside the transaction and unable to throw: the order is written, and
+	 * a convenience row failing to save is not a reason to tell the customer
+	 * their order did not go through.
+	 */
+	await rememberAddresses({
+		userId: params.userId,
+		billing: params.billingAddress,
+		// Only when they actually asked to deliver elsewhere; when they did not,
+		// `shippingAddress` is a copy of the billing one and would store twice.
+		...(params.shippingAddress ? { shipping: params.shippingAddress } : {}),
+	})
 
 	// Fire-and-forget: a slow or unreachable mail server must never fail an
 	// order that has already been written and paid for.
