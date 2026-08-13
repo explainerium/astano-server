@@ -41,7 +41,19 @@ const detailInclude = {
 	translations: true,
 	tabs: { include: { translations: true }, orderBy: { sortOrder: "asc" } },
 	categories: { include: { category: { include: { translations: true } } } },
-	attributes: true,
+	/*
+	 * The attribute and the value, not just their ids.
+	 *
+	 * The admin form only ever needed the ids — it draws from its own lists —
+	 * but the product page has to print "Material: Edelstahl", and neither of
+	 * those words is in a ProductAttribute row.
+	 */
+	attributes: {
+		include: {
+			attribute: { include: { translations: true } },
+			attributeValue: { include: { translations: true } },
+		},
+	},
 	prices: true,
 	priceTiers: true,
 	assets: { include: { asset: true }, orderBy: { sortOrder: "asc" } },
@@ -183,6 +195,36 @@ const toPublicProduct = (
 				return { id: tab.id, title: tt?.title ?? "", content: tt?.content ?? null }
 			})
 			.filter((tab) => tab.title.trim() !== "" && (tab.content ?? "").trim() !== ""),
+
+		/**
+		 * The attributes the shop chose to publish, for the specification table.
+		 *
+		 * Only `isVisible` ones. That checkbox is in the admin form and until now
+		 * governed nothing at all — the product page read a variant's attributes
+		 * and never the product's, so a shop that ticked "Material: Edelstahl"
+		 * saw it appear nowhere. This is what the client meant by "attributes are
+		 * not shown on product page".
+		 *
+		 * Regrouped to one entry per attribute, because the rows are stored
+		 * expanded — an attribute with three values is three rows — and a table
+		 * listing "Material" three times is not a specification.
+		 */
+		attributes: [
+			...row.attributes
+				.filter((a) => a.isVisible)
+				.reduce((map, a) => {
+					const name =
+						pickTranslation(a.attribute.translations, locale)?.name ?? a.attribute.code
+					const label =
+						pickTranslation(a.attributeValue.translations, locale)?.label ??
+						a.attributeValue.code
+
+					const entry = map.get(a.attributeId) ?? { id: a.attributeId, name, values: [] }
+					entry.values.push(label)
+					return map.set(a.attributeId, entry)
+				}, new Map<string, { id: string; name: string; values: string[] }>())
+				.values(),
+		],
 
 		quoteOnly: row.quoteEnabled,
 		moq: row.moq,
