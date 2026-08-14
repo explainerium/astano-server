@@ -7,7 +7,7 @@ import { SettingService } from "../setting/setting.service"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
 import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
-import { checkArtworkComplete, readArtworkRules } from "../../../domain/product/artwork"
+import { checkArtwork, readArtworkRules } from "../../../domain/product/artwork"
 import { rememberAddresses } from "./rememberAddress"
 import { ArtworkService } from "../media/artwork.service"
 import { availableOf, canTake, isLow, readStockRules } from "../../../domain/stock/availability"
@@ -296,20 +296,18 @@ const quoteCart = async (params: QuoteParams) => {
 		}
 
 		/*
-		 * A cutter in the shape of a logo cannot be made from a blank. The form
-		 * asks for the file and the cart flags the line, but neither is what
-		 * keeps an unmakeable order out of production — this is.
+		 * What is attached must be allowed — but nothing has to be attached.
+		 *
+		 * A line carrying more files than the product accepts, or files on a
+		 * product that accepts none, is data that should never have been written
+		 * and is still refused. A line with *no* file is not: the client's rule
+		 * is that print files may follow the order, so an order missing one is
+		 * an order waiting on artwork, not an invalid one.
+		 *
+		 * This used to throw, and the checkout would not let the customer past.
 		 */
-		const artworkProblem = checkArtworkComplete(readArtworkRules(product), item.files.length)
-		if (artworkProblem) {
-			if (artworkProblem.kind === "REQUIRED") {
-				throw new ApiError(httpStatus.CONFLICT, "A line needs a file", {
-					messageKey: "order.lineArtworkRequired",
-					messageVars: { sku: label },
-				})
-			}
-			ArtworkService.refuse(artworkProblem)
-		}
+		const artworkProblem = checkArtwork(readArtworkRules(product), item.files.length)
+		if (artworkProblem) ArtworkService.refuse(artworkProblem)
 
 		if (!canTake(item.variant, item.quantity, stockRules)) {
 			throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
@@ -633,7 +631,11 @@ const place = async (
 		})
 	}
 
-	const q = await quoteCart({ ...params, shippingCountry: shippingAddress.countryCode, shippingState: shippingAddress.state })
+	const q = await quoteCart({
+		...params,
+		shippingCountry: shippingAddress.countryCode,
+		shippingState: shippingAddress.state,
+	})
 
 	/** Filled as stock is decremented, mailed once the order has committed. */
 	const lowStock: { sku: string | null; remaining: number }[] = []
