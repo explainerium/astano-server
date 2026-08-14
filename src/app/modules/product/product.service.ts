@@ -418,6 +418,24 @@ const toAuthor = (user: ProductDetail["createdBy"]) => {
 }
 
 /** Admin shape — everything, including the internal label. */
+/**
+ * The retail price the admin list shows, as a number to sort on.
+ *
+ * The same row the table prints: the default variant's retail price where it
+ * has one, otherwise the product's. A product with no price at all sorts last
+ * whichever way the column is pointed — Infinity rather than 0, because "no
+ * price" is not "free" and should not lead the cheapest-first list.
+ */
+const adminRetailPrice = (product: { prices: { role: string; basePrice: unknown }[]; variants: { isDefault: boolean; prices: { role: string; basePrice: unknown }[] }[] }): number => {
+	const retail = (rows: { role: string; basePrice: unknown }[]) =>
+		rows.find((r) => r.role === "GUEST") ?? rows.find((r) => r.role === "B2C")
+
+	const variant = product.variants.find((v) => v.isDefault) ?? product.variants[0]
+	const row = (variant && retail(variant.prices)) ?? retail(product.prices)
+	const value = Number(row?.basePrice ?? Number.NaN)
+
+	return Number.isNaN(value) ? Number.POSITIVE_INFINITY : value
+}
 const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 	const t = pickTranslation(row.translations, locale)
 
@@ -759,6 +777,8 @@ const adminList = async (params: {
 	search?: string
 	page: number
 	limit: number
+	sort?: "created" | "updated" | "name" | "price"
+	dir?: "asc" | "desc"
 }) => {
 	const stockRules = params.stockStatus
 		? readStockRules(await SettingService.getMap())
@@ -784,19 +804,53 @@ const adminList = async (params: {
 			: {}),
 	}
 
+	const sort = params.sort ?? "created"
+	const dir = params.dir ?? "desc"
+
+	/**
+	 * Name and price are not columns Postgres can sort.
+	 *
+	 * The name lives in a translation row, one per language, and the price is
+	 * whichever retail row the variant or the product carries. Ordering by
+	 * either means loading what matches, deciding in memory, and paging after —
+	 * the same trade the shop's own list already makes for price, and at this
+	 * catalogue's size the difference is milliseconds.
+	 *
+	 * Dates stay in the database, where they belong.
+	 */
+	const inMemory = sort === "name" || sort === "price"
+
 	const [rows, total] = await Promise.all([
 		prisma.product.findMany({
 			where,
 			include: detailInclude,
-			orderBy: { updatedAt: "desc" },
-			skip: (params.page - 1) * params.limit,
-			take: params.limit,
+			...(inMemory
+				? {}
+				: {
+						orderBy: { [sort === "updated" ? "updatedAt" : "createdAt"]: dir },
+						skip: (params.page - 1) * params.limit,
+						take: params.limit,
+					}),
 		}),
 		prisma.product.count({ where }),
 	])
 
+	let shown = rows.map((r) => toAdminProduct(r, params.locale))
+
+	if (inMemory) {
+		const compare =
+			sort === "name"
+				? (a: (typeof shown)[number], b: (typeof shown)[number]) =>
+						a.name.localeCompare(b.name, params.locale)
+				: (a: (typeof shown)[number], b: (typeof shown)[number]) =>
+						adminRetailPrice(a) - adminRetailPrice(b)
+
+		shown = [...shown].sort((a, b) => (dir === "asc" ? compare(a, b) : compare(b, a)))
+		shown = shown.slice((params.page - 1) * params.limit, params.page * params.limit)
+	}
+
 	return {
-		data: rows.map((r) => toAdminProduct(r, params.locale)),
+		data: shown,
 		meta: {
 			page: params.page,
 			limit: params.limit,

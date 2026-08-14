@@ -73,6 +73,8 @@ const adminList: RequestHandler = catchAsync(async (req, res) => {
 		search?: string
 		page?: number
 		limit?: number
+		sort?: "created" | "updated" | "name" | "price"
+		dir?: "asc" | "desc"
 	}
 
 	const result = await ProductService.adminList({
@@ -85,6 +87,8 @@ const adminList: RequestHandler = catchAsync(async (req, res) => {
 		search: q.search,
 		page: Number(q.page ?? 1),
 		limit: Number(q.limit ?? 50),
+		sort: q.sort ?? "created",
+		dir: q.dir ?? "desc",
 	})
 
 	sendResponse(res, {

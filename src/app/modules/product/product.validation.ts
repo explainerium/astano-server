@@ -291,6 +291,16 @@ export const adminListProductsSchema = z.object({
 		search: z.string().trim().max(200).optional(),
 		page: z.coerce.number().int().min(1).default(1),
 		limit: z.coerce.number().int().min(1).max(200).default(50),
+		/**
+		 * What to order by, and which way.
+		 *
+		 * "created" by default, newest first: the list used to be ordered by
+		 * `updatedAt`, which meant opening a product and saving it moved that
+		 * product to the top. The one thing an admin does most reordered the
+		 * page under them every time.
+		 */
+		sort: z.enum(["created", "updated", "name", "price"]).default("created"),
+		dir: z.enum(["asc", "desc"]).default("desc"),
 	}),
 })
 

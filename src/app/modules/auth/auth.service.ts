@@ -186,10 +186,17 @@ const login = async (
 	// application status; SUSPENDED needs its own invoices and the chance to
 	// correct its details. Neither can trade — the auth() guard keeps them off
 	// the trading routes and R5b prices them as guests.
-	await prisma.user.update({
-		where: { id: user.id },
-		data: { lastLoginAt: new Date() },
-	})
+	/*
+	 * Record-keeping, off the critical path.
+	 *
+	 * Awaiting this put a whole database round trip between the password check
+	 * and the response — measurably ~165ms from where this is developed, and
+	 * for a stamp nobody is waiting to read. A failure here must not cost
+	 * somebody their session either, so it is logged rather than thrown.
+	 */
+	void prisma.user
+		.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } })
+		.catch((error) => logger.warn({ err: error, userId: user.id }, "Could not stamp lastLoginAt"))
 
 	return issueTokens(user, device)
 }
