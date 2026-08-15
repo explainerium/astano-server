@@ -58,10 +58,19 @@ const sweepGuestQuoteBaskets = safely("sweep-guest-quote-baskets", async () => {
 const sweepTokens = safely("sweep-tokens", async () => {
 	const now = new Date()
 
+	// The filter belongs under `where`. It sat at the top level behind an
+	// `as never`, which typechecked and then failed Prisma's own argument
+	// validation on every run — so this job had never once deleted a row, and
+	// took the reset-token sweep down with it through Promise.all.
 	const [refresh, reset] = await Promise.all([
 		prisma.refreshToken.deleteMany({
-			OR: [{ expiresAt: { lt: now } }, { revokedAt: { not: null, lt: new Date(now.getTime() - 30 * 864e5) } }],
-		} as never),
+			where: {
+				OR: [
+					{ expiresAt: { lt: now } },
+					{ revokedAt: { not: null, lt: new Date(now.getTime() - 30 * 864e5) } },
+				],
+			},
+		}),
 		prisma.passwordResetToken.deleteMany({ where: { expiresAt: { lt: now } } }),
 	])
 

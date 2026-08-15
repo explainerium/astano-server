@@ -15,6 +15,22 @@ import "./app/interfaces/locale"
 
 const app: Application = express()
 
+/**
+ * One proxy hop, not "any number of them".
+ *
+ * The API is deployed behind Render's load balancer, so without this every
+ * request appears to come from the proxy's own address. The rate limiters key
+ * on `req.ip`, which meant the whole site shared a single bucket: ten wrong
+ * passwords from one visitor locked everybody else out of signing in for
+ * fifteen minutes. Refresh tokens recorded the proxy's address too, so the
+ * "which device was this?" column said the same thing on every row.
+ *
+ * `1` rather than `true`: trusting the entire chain lets a client prepend its
+ * own X-Forwarded-For and claim any address it likes, which hands back the
+ * rate-limit bypass this is here to close.
+ */
+app.set("trust proxy", 1)
+
 app.use(helmet())
 app.use(
 	cors({

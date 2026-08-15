@@ -22,9 +22,14 @@ import sanitizeHtml from "sanitize-html"
 /**
  * Exactly what the toolbar in ProRichText can emit, and nothing else.
  *
- * Deliberately narrow: `img`, `iframe`, `table` and friends are absent because
- * no control produces them, so their presence in a stored description means
- * something got in by another route.
+ * Deliberately narrow: `img` and `iframe` are absent because no control
+ * produces them, so their presence in a stored description means something got
+ * in by another route.
+ *
+ * The table tags are here because the toolbar *does* have an Insert Table
+ * button. Without them sanitize-html dropped each tag and kept its text, so a
+ * saved size chart came back as one run of concatenated cell values — the
+ * admin's work destroyed on save, with no warning and no undo.
  */
 const ALLOWED_TAGS = [
 	"p",
@@ -50,6 +55,15 @@ const ALLOWED_TAGS = [
 	"code",
 	"pre",
 	"span",
+	"table",
+	"thead",
+	"tbody",
+	"tfoot",
+	"tr",
+	"th",
+	"td",
+	"colgroup",
+	"col",
 ]
 
 const OPTIONS: sanitizeHtml.IOptions = {
@@ -60,6 +74,15 @@ const OPTIONS: sanitizeHtml.IOptions = {
 		// rather than re-added so an existing link is not rewritten, and
 		// `enforceHtmlBoundary` below stops anything else riding along.
 		a: ["href", "title", "target", "rel"],
+
+		// Merged cells survive; column widths deliberately do not. `style` is
+		// absent from every entry here, so the inline width prosemirror-tables
+		// writes is stripped on the way in — which is what the editor already
+		// intends by turning resizing off: a dragged pixel width fights the
+		// storefront's own layout on a phone. Widths are the stylesheet's job.
+		th: ["colspan", "rowspan"],
+		td: ["colspan", "rowspan"],
+		col: ["span"],
 	},
 
 	// The scheme allowlist. `javascript:` and `data:` are absent, which is the
