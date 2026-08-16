@@ -171,6 +171,18 @@ const downloadLocal = (req: Request, res: Response): void => {
 		return
 	}
 
+	/*
+	 * Handed over as a download, never rendered in place.
+	 *
+	 * Design files are an allow-list that includes SVG, and an SVG is a document
+	 * a browser will happily execute scripts inside. Served inline from this
+	 * origin that is same-origin with the API and its refresh-token cookie.
+	 * helmet's CSP already blocks the script; `attachment` means the browser
+	 * never gets as far as parsing it, and `nosniff` stops it deciding the file
+	 * is something more interesting than what we said it was.
+	 */
+	res.setHeader("Content-Disposition", "attachment")
+	res.setHeader("X-Content-Type-Options", "nosniff")
 	res.sendFile(full)
 }
 

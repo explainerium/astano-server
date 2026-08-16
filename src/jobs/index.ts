@@ -2,6 +2,7 @@ import cron, { type ScheduledTask } from "node-cron"
 import { env } from "../config"
 import { logger } from "../shared/logger"
 import { prisma } from "../shared/prisma"
+import { MediaService } from "../app/modules/media/media.service"
 import { QuoteService } from "../app/modules/quote/quote.service"
 
 /**
@@ -52,6 +53,20 @@ const sweepGuestQuoteBaskets = safely("sweep-guest-quote-baskets", async () => {
 })
 
 /**
+ * Uploads nobody ever attached to anything.
+ *
+ * The other sweeps here take rows; this one also takes objects out of the
+ * bucket, which is the only storage the shop pays for by the gigabyte. Deleting
+ * a guest cart already cascaded its `CartItemFile` rows away and left the files
+ * themselves behind, so every abandoned basket used to cost a little more
+ * forever.
+ */
+const sweepOrphanedArtwork = safely("sweep-orphaned-artwork", async () => {
+	const count = await MediaService.sweepOrphanedArtwork()
+	return `removed ${count} unattached upload(s)`
+})
+
+/**
  * Expired and revoked tokens are dead weight. Refresh tokens especially: one
  * row per device per login, and nothing ever removed them.
  */
@@ -83,6 +98,9 @@ const SCHEDULE = [
 	{ name: "sweep-guest-carts", cron: "30 3 * * *", run: sweepGuestCarts },
 	{ name: "sweep-guest-quote-baskets", cron: "35 3 * * *", run: sweepGuestQuoteBaskets },
 	{ name: "sweep-tokens", cron: "40 3 * * *", run: sweepTokens },
+	// After the basket sweeps, so a file whose only line was removed minutes ago
+	// is already unreferenced when this looks at it.
+	{ name: "sweep-orphaned-artwork", cron: "45 3 * * *", run: sweepOrphanedArtwork },
 ] as const
 
 const tasks: ScheduledTask[] = []
@@ -108,6 +126,7 @@ export const JOBS = {
 	"sweep-guest-carts": sweepGuestCarts,
 	"sweep-guest-quote-baskets": sweepGuestQuoteBaskets,
 	"sweep-tokens": sweepTokens,
+	"sweep-orphaned-artwork": sweepOrphanedArtwork,
 } as const
 
 export type JobName = keyof typeof JOBS

@@ -8,13 +8,15 @@ import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
 import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
 import { checkArtwork, readArtworkRules } from "../../../domain/product/artwork"
+import { nestOptionLines } from "../../../domain/order/nestOptionLines"
 import { rememberAddresses } from "./rememberAddress"
 import { ArtworkService } from "../media/artwork.service"
 import { availableOf, canTake, isLow, readStockRules } from "../../../domain/stock/availability"
+import { reservationFor } from "../../../domain/stock/reservation"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
 import { resolveShipping } from "../../../domain/shipping/resolveShipping"
-import { resolveTax, type TaxRateInput } from "../../../domain/tax/resolveTax"
+import { resolveOrderTax } from "./orderTax"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
@@ -138,31 +140,27 @@ const view = (row: OrderRow, opts: { staff?: boolean } = {}) => ({
 			},
 		])
 	),
-	items: row.items
-		.filter((i) => !i.parentItemId)
-		.map((i) => ({
-			id: i.id,
-			sku: i.sku,
-			name: i.name,
-			attributes: i.attributes,
-			quantity: i.quantity,
-			unitPrice: i.unitPrice.toFixed(2),
-			lineTotal: i.lineTotal.toFixed(2),
-			// What production is to make this from. assetId is null once the
-			// upload is deleted; the name stays so the order still records it.
-			files: i.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
-			options: row.items
-				.filter((o) => o.parentItemId === i.id)
-				.map((o) => ({
-					id: o.id,
-					sku: o.sku,
-					name: o.name,
-					quantity: o.quantity,
-					unitPrice: o.unitPrice.toFixed(2),
-					lineTotal: o.lineTotal.toFixed(2),
-					files: o.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
-				})),
+	items: nestOptionLines(row.items).map(({ line: i, options }) => ({
+		id: i.id,
+		sku: i.sku,
+		name: i.name,
+		attributes: i.attributes,
+		quantity: i.quantity,
+		unitPrice: i.unitPrice.toFixed(2),
+		lineTotal: i.lineTotal.toFixed(2),
+		// What production is to make this from. assetId is null once the
+		// upload is deleted; the name stays so the order still records it.
+		files: i.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
+		options: options.map((o) => ({
+			id: o.id,
+			sku: o.sku,
+			name: o.name,
+			quantity: o.quantity,
+			unitPrice: o.unitPrice.toFixed(2),
+			lineTotal: o.lineTotal.toFixed(2),
+			files: o.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
 		})),
+	})),
 	taxLines: row.taxLines.map((t) => ({
 		name: t.name,
 		ratePercent: t.ratePercent.toFixed(2),
@@ -439,50 +437,27 @@ const quoteCart = async (params: QuoteParams) => {
 	 */
 
 	// ── tax ─────────────────────────────────────────────────────────────────
-	// One tax class per order, taken from the default class. Per-product classes
-	// are supported by the schema and land with mixed-rate baskets; for now the
-	// common case is one rate for the whole order.
-	const taxClass = await prisma.taxClass.findFirst({
-		where: { isDefault: true },
-		include: { rates: true },
-	})
-
 	const user = params.userId
 		? await prisma.user.findUnique({ where: { id: params.userId } })
 		: null
 
-	/*
-	 * The master switch, and what "off" has to mean.
-	 *
-	 * Explicitly **not** `unconfigured`. That state exists to refuse an order
-	 * rather than invoice it at 0 % because nobody entered a rate — an accident.
-	 * A shop that has deliberately turned tax off has not had an accident, so
-	 * checkout must proceed. Routing this through resolveTax with no country
-	 * would produce the refusing state instead, which is why it is spelt out.
+	/**
+	 * Each line carries its product's own tax status and class, so a product
+	 * marked "not taxed" is not taxed and a reduced-rate class reaches the
+	 * customer. The rest is `orderTax.ts`, which quote acceptance calls too.
 	 */
-	const taxEnabled = settings["tax.enabled"] !== false
-
-	const tax = !taxEnabled
-		? { lines: [], totalTax: "0.00", reverseCharged: false, unconfigured: false }
-		: resolveTax({
+	const tax = await resolveOrderTax({
 		countryCode: params.shippingCountry ?? null,
 		state: params.shippingState ?? null,
-		netAmount: subtotal,
-		shippingAmount: shippingCost,
-		shippingTaxable,
+		lines: lines.map((line) => ({
+			net: line.lineTotal,
+			taxStatus: line.item.variant.product.taxStatus,
+			taxClassId: line.item.variant.product.taxClassId,
+		})),
+		shippingCost,
+		shippingMethodTaxable: shippingTaxable,
 		hasValidatedVatId: user?.vatValidated ?? false,
-		rates: (taxClass?.rates ?? []).map(
-			(r): TaxRateInput => ({
-				countryCode: r.countryCode,
-				state: r.state,
-				name: r.name,
-				rate: r.rate.toString(),
-				appliesToShipping: r.appliesToShipping,
-				priority: r.priority,
-				reverseChargeWithVatId: r.reverseChargeWithVatId,
-				isActive: r.isActive,
-			})
-		),
+		settings,
 	})
 
 	const grandTotal = subtotal.plus(shippingCost).plus(new Decimal(tax.totalTax))
@@ -775,21 +750,53 @@ const place = async (
 			})
 		}
 
-		// Reserve stock now. Inside the same transaction as the order, so two
-		// simultaneous checkouts cannot both take the last item.
+		/*
+		 * Reserve stock, and let the database be the one to say no.
+		 *
+		 * `quoteCart` checked availability, but it ran before this transaction
+		 * opened and read a row anybody could have taken since. An unguarded
+		 * `decrement` is not a check — under READ COMMITTED two checkouts for the
+		 * last unit both pass the earlier read, both decrement, and the variant
+		 * ends up at -1 with two customers promised the same item.
+		 *
+		 * The condition therefore travels *with* the write: the row is locked for
+		 * the duration of the update, so the second transaction evaluates
+		 * `stock >= needed` against the value the first one left behind and
+		 * matches nothing. `count === 0` is that refusal, and it rolls the whole
+		 * order back rather than shipping an oversell.
+		 */
 		for (const line of q.lines) {
-			if (line.item.variant.manageStock) {
-				const after = await tx.productVariant.update({
-					where: { id: line.item.variantId },
-					data: { stock: { decrement: line.item.quantity } },
-					select: { sku: true, stock: true, manageStock: true, allowBackorder: true, lowStockThreshold: true },
-				})
+			const variant = line.item.variant
+			const reservation = reservationFor(variant, line.item.quantity, q.stockRules)
+			if (reservation.kind === "untracked") continue
 
-				// Read the level back from the update rather than subtracting here:
-				// under two simultaneous checkouts the returned row is the real one,
-				// and a guess would warn on the wrong order or not at all.
-				if (isLow(after, q.stockRules)) lowStock.push({ sku: after.sku, remaining: after.stock })
+			const floor =
+				reservation.kind === "guarded" ? { stock: { gte: reservation.minimumStock } } : {}
+
+			const reserved = await tx.productVariant.updateMany({
+				where: { id: line.item.variantId, manageStock: true, ...floor },
+				data: { stock: { decrement: line.item.quantity } },
+			})
+
+			if (reserved.count === 0) {
+				throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
+					messageKey: "order.lineOutOfStock",
+					messageVars: {
+						sku: variant.sku ?? line.name,
+						available: String(availableOf(variant, q.stockRules) ?? 0),
+					},
+				})
 			}
+
+			// Read the level back rather than subtracting here: under two
+			// simultaneous checkouts the stored row is the real one, and a guess
+			// would warn on the wrong order or not at all.
+			const after = await tx.productVariant.findUniqueOrThrow({
+				where: { id: line.item.variantId },
+				select: { sku: true, stock: true, manageStock: true, allowBackorder: true, lowStockThreshold: true },
+			})
+
+			if (isLow(after, q.stockRules)) lowStock.push({ sku: after.sku, remaining: after.stock })
 		}
 
 		await tx.cartItem.deleteMany({ where: { cartId: q.cart.id } })

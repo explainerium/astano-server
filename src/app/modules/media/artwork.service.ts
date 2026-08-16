@@ -113,14 +113,34 @@ const refuse = (problem: ArtworkProblem | null) => {
  * Replace rather than add: the customer edits a set, and an add-only API makes
  * "remove the one I attached by mistake" a second endpoint nobody builds.
  */
+/**
+ * Whether this caller owns the basket a line sits in.
+ *
+ * Two kinds of basket, two kinds of proof. A claimed one belongs to an account
+ * and the token is gone; an anonymous one is addressed only by the httpOnly
+ * cookie the visitor holds, and that cookie is the whole of its identity.
+ *
+ * Testing only `owner.userId && owner.userId !== userId` — which is what this
+ * used to do — reads as "a guest basket belongs to nobody, so let anyone at
+ * it": any signed-in customer could attach files to a stranger's line if they
+ * ever learnt its id. Absent proof is not proof.
+ */
+const ownsBasket = (
+	owner: { userId: string | null; token: string | null },
+	caller: { userId?: string; token?: string }
+): boolean =>
+	owner.userId ? owner.userId === caller.userId : Boolean(owner.token) && owner.token === caller.token
+
 const setCartItemFiles = async (
 	cartItemId: string,
 	assetIds: string[],
-	userId: string | undefined
+	userId: string | undefined,
+	/** The guest cart cookie, so an unclaimed cart can still prove it is theirs. */
+	cartToken?: string
 ): Promise<ArtworkFile[]> => {
 	const item = await prisma.cartItem.findUnique({
 		where: { id: cartItemId },
-		select: { id: true, variantId: true, cart: { select: { userId: true } } },
+		select: { id: true, variantId: true, cart: { select: { userId: true, token: true } } },
 	})
 
 	if (!item) {
@@ -130,7 +150,7 @@ const setCartItemFiles = async (
 	}
 
 	// The line has to be the caller's as well as the files.
-	if (item.cart.userId && item.cart.userId !== userId) {
+	if (!ownsBasket(item.cart, { userId, token: cartToken })) {
 		throw new ApiError(httpStatus.NOT_FOUND, "That line is not in your cart", {
 			messageKey: "cart.itemNotFound",
 		})
@@ -153,11 +173,13 @@ const setCartItemFiles = async (
 const setBasketItemFiles = async (
 	basketItemId: string,
 	assetIds: string[],
-	userId: string | undefined
+	userId: string | undefined,
+	/** The guest basket cookie — same reasoning as the cart above. */
+	basketToken?: string
 ): Promise<ArtworkFile[]> => {
 	const item = await prisma.quoteBasketItem.findUnique({
 		where: { id: basketItemId },
-		select: { id: true, variantId: true, basket: { select: { userId: true } } },
+		select: { id: true, variantId: true, basket: { select: { userId: true, token: true } } },
 	})
 
 	if (!item) {
@@ -166,7 +188,7 @@ const setBasketItemFiles = async (
 		})
 	}
 
-	if (item.basket.userId && item.basket.userId !== userId) {
+	if (!ownsBasket(item.basket, { userId, token: basketToken })) {
 		throw new ApiError(httpStatus.NOT_FOUND, "That line is not in your basket", {
 			messageKey: "quote.itemNotFound",
 		})

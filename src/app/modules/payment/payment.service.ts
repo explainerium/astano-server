@@ -202,15 +202,25 @@ const available = async (
 
 	let completedOrders = 0
 	let hasValidatedVatId = false
-	let billingCountry = ctx.countryCode ?? null
+	const billingCountry = ctx.countryCode ?? null
 
 	if (ctx.userId) {
-		const user = await prisma.user.findUnique({ where: { id: ctx.userId } })
+		/*
+		 * Counted, not assumed to be zero.
+		 *
+		 * This used to return 0 for everybody with a note saying order history had
+		 * not landed yet. It has: checkout's own quote counts it properly, which
+		 * left the two disagreeing — this endpoint told a returning customer that
+		 * payment by invoice was unavailable while the checkout offered it, and the
+		 * quote-acceptance screen, which reads only this one, refused it outright.
+		 */
+		const [user, completed] = await Promise.all([
+			prisma.user.findUnique({ where: { id: ctx.userId } }),
+			prisma.order.count({ where: { userId: ctx.userId, status: "COMPLETED" } }),
+		])
+
 		hasValidatedVatId = user?.vatValidated ?? false
-		// Order history lands with 3C; until then every customer counts as new,
-		// which is the safe direction — it hides invoice payment rather than
-		// offering it to someone who has never ordered.
-		completedOrders = 0
+		completedOrders = completed
 	}
 
 	const verdicts = evaluateMethods(

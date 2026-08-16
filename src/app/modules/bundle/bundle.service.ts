@@ -9,6 +9,7 @@ import { effectiveRole, type PricingRole } from "../../../domain/pricing/effecti
 import type { RolePriceInput } from "../../../domain/pricing/resolvePrice"
 import { availableOf, canTake, readStockRules } from "../../../domain/stock/availability"
 import { SettingService } from "../setting/setting.service"
+import { loadExternalTiers, type ExternalTiers } from "../product/tierSources"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
@@ -60,7 +61,15 @@ const toLine = (
 	variant: VariantRow,
 	quantity: number,
 	locale: LocaleCode,
-	discountPercent?: string | null
+	discountPercent?: string | null,
+	/**
+	 * The ladders that live outside the product, for this variant's product.
+	 *
+	 * Optional only so the signature reads the same as it did; every caller
+	 * passes it. Leaving it out is what made the configurator quote a dealer the
+	 * catalogue price and the cart then charge the agreed one.
+	 */
+	external?: ExternalTiers
 ): ConfigurableLine => ({
 	variantId: variant.id,
 	sku: variant.sku,
@@ -72,6 +81,7 @@ const toLine = (
 	productPrices: toPriceInputs(variant.product.prices, variant.product.priceTiers),
 	variantPrices: toPriceInputs(variant.prices, variant.priceTiers),
 	discountPercent: discountPercent ?? null,
+	...external,
 })
 
 interface Selection {
@@ -120,7 +130,16 @@ const loadConfiguration = async (
 		}
 	}
 
-	const optionLines: ConfigurableLine[] = []
+	/*
+	 * The chosen variants, not lines built from them.
+	 *
+	 * Pricing needs the ladders that hang off each option's *product*, and those
+	 * are loaded in one batch by the caller — which it can only do once it knows
+	 * which products are involved. Handing back the rows keeps that possible;
+	 * handing back finished lines meant they were priced before anybody had
+	 * looked a customer ladder up.
+	 */
+	const chosen: { variant: VariantRow; quantity: number; discountPercent: string | null }[] = []
 
 	for (const sel of options) {
 		const entry = offeredVariants.get(sel.variantId)
@@ -136,31 +155,69 @@ const loadConfiguration = async (
 			})
 		}
 
-		optionLines.push(toLine(entry.variant, sel.quantity, locale, entry.discountPercent))
+		chosen.push({
+			variant: entry.variant,
+			quantity: sel.quantity,
+			discountPercent: entry.discountPercent,
+		})
 	}
 
-	return { main, offered, optionLines }
+	return { main, offered, chosen }
 }
 
-const roleOf = (ctx: { role?: string; status?: string }): PricingRole =>
+interface Viewer {
+	userId?: string
+	role?: string
+	status?: string
+}
+
+const roleOf = (ctx: Viewer): PricingRole =>
 	effectiveRole((ctx.role ?? null) as never, (ctx.status ?? null) as never)
+
+/**
+ * The ladders outside the product, for every product in one configuration.
+ *
+ * `withCategoryQuantities` is deliberately off, matching the product page: a
+ * category ladder is measured against the whole basket, and the configurator is
+ * answering "what would this line cost", not "what does my basket now cost".
+ * The cart remains the authority on the second question.
+ */
+const externalTiersFor = async (ctx: Viewer, productIds: string[]) =>
+	loadExternalTiers({
+		productIds: [...new Set(productIds)],
+		role: roleOf(ctx),
+		userId: ctx.userId,
+	})
 
 /** Live repricing as the customer ticks options and changes quantities. */
 const price = async (
-	ctx: { role?: string; status?: string },
+	ctx: Viewer,
 	payload: { variantId: string; quantity: number; options: Selection[] },
 	locale: LocaleCode
 ) => {
-	const { main, offered, optionLines } = await loadConfiguration(
+	const { main, offered, chosen } = await loadConfiguration(
 		payload.variantId,
 		payload.options,
 		locale
 	)
 
+	const external = await externalTiersFor(ctx, [
+		main.productId,
+		...chosen.map((option) => option.variant.productId),
+	])
+
 	const priced = priceBundle({
 		role: roleOf(ctx),
-		main: toLine(main, payload.quantity, locale),
-		options: optionLines,
+		main: toLine(main, payload.quantity, locale, null, external(main.productId)),
+		options: chosen.map((option) =>
+			toLine(
+				option.variant,
+				option.quantity,
+				locale,
+				option.discountPercent,
+				external(option.variant.productId)
+			)
+		),
 	})
 
 	return {
@@ -192,16 +249,29 @@ const price = async (
  */
 const addToCart = async (
 	owner: { userId?: string; cartId: string },
-	ctx: { role?: string; status?: string },
+	ctx: Viewer,
 	payload: { variantId: string; quantity: number; options: Selection[] },
 	locale: LocaleCode
 ) => {
-	const { main, optionLines } = await loadConfiguration(payload.variantId, payload.options, locale)
+	const { main, chosen } = await loadConfiguration(payload.variantId, payload.options, locale)
+
+	const external = await externalTiersFor(ctx, [
+		main.productId,
+		...chosen.map((option) => option.variant.productId),
+	])
 
 	const priced = priceBundle({
 		role: roleOf(ctx),
-		main: toLine(main, payload.quantity, locale),
-		options: optionLines,
+		main: toLine(main, payload.quantity, locale, null, external(main.productId)),
+		options: chosen.map((option) =>
+			toLine(
+				option.variant,
+				option.quantity,
+				locale,
+				option.discountPercent,
+				external(option.variant.productId)
+			)
+		),
 	})
 
 	// Validate in the SERVICE layer, not in an HTTP hook. The old shop's bundle
@@ -226,20 +296,16 @@ const addToCart = async (
 	// Stock, checked across the whole configuration before anything is written.
 	const stockRules = readStockRules(await SettingService.getMap())
 
+	// `chosen` already carries the whole variant row, so this no longer fetches
+	// each option again one at a time.
 	for (const line of [
-		{ variantId: main.id, quantity: payload.quantity, v: main },
-		...optionLines.map((o) => ({
-			variantId: o.variantId,
-			quantity: o.quantity,
-			v: null as VariantRow | null,
-		})),
+		{ variant: main, quantity: payload.quantity },
+		...chosen.map((option) => ({ variant: option.variant, quantity: option.quantity })),
 	]) {
-		const variant =
-			line.v ?? (await prisma.productVariant.findUnique({ where: { id: line.variantId } }))
-		if (variant && !canTake(variant, line.quantity, stockRules)) {
+		if (!canTake(line.variant, line.quantity, stockRules)) {
 			throw new ApiError(httpStatus.CONFLICT, "Not enough stock", {
 				messageKey: "cart.insufficientStock",
-				messageVars: { available: String(availableOf(variant, stockRules) ?? 0) },
+				messageVars: { available: String(availableOf(line.variant, stockRules) ?? 0) },
 			})
 		}
 	}
@@ -249,11 +315,11 @@ const addToCart = async (
 			data: { cartId: owner.cartId, variantId: main.id, quantity: payload.quantity },
 		})
 
-		for (const option of optionLines) {
+		for (const option of chosen) {
 			await tx.cartItem.create({
 				data: {
 					cartId: owner.cartId,
-					variantId: option.variantId,
+					variantId: option.variant.id,
 					quantity: option.quantity,
 					// Cascades on delete, so removing the cutter removes its
 					// engraving — the customer never ends up owning an option on

@@ -80,7 +80,27 @@ const detailInclude = {
 	options: {
 		include: {
 			optionProduct: {
-				include: { translations: true, prices: true, priceTiers: true, featuredAsset: true },
+				include: {
+					translations: true,
+					prices: true,
+					priceTiers: true,
+					featuredAsset: true,
+					/*
+					 * Which variant an option is actually bought as.
+					 *
+					 * The configurator takes variant ids, and this payload carried only
+					 * the option *product*, so the product page fetched each option's
+					 * whole product again one at a time just to learn its default
+					 * variant — six options meant six extra round trips before anything
+					 * could be added, on a free-tier API that sleeps.
+					 */
+					variants: {
+						where: { isActive: true },
+						orderBy: [{ isDefault: "desc" }, { sortOrder: "asc" }],
+						take: 1,
+						select: { id: true },
+					},
+				},
 			},
 		},
 		orderBy: { sortOrder: "asc" },
@@ -347,6 +367,9 @@ const toPublicProduct = (
 
 			return {
 				id: o.optionProduct.id,
+				/// What the configurator posts back. Null for an option product with
+				/// no active variant, which cannot be bought and the page hides.
+				variantId: o.optionProduct.variants[0]?.id ?? null,
 				name: ot?.name ?? "(untitled)",
 				slug: ot?.slug ?? o.optionProduct.id,
 				groupLabel: o.groupLabel,

@@ -32,3 +32,18 @@ export const externalLimiter = make(
 	15 * 60 * 1000,
 	"Too many validation attempts. Please try again later."
 )
+
+/**
+ * Uploads, which cost money rather than merely time.
+ *
+ * Every other endpoint here writes rows; this one writes 10 MB objects into the
+ * bucket the shop is billed for, and it was the one path with no limit at all —
+ * any signed-in customer could fill it as fast as their connection allowed.
+ * Sixty in a quarter of an hour is far beyond the six files a product accepts
+ * and nowhere near enough to be worth attempting.
+ */
+export const uploadLimiter = make(
+	60,
+	15 * 60 * 1000,
+	"Too many uploads. Please wait a moment and try again."
+)

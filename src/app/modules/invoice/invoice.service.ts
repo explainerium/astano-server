@@ -3,6 +3,7 @@
 // types from a CommonJS file. The runtime import is dynamic — see getBrowser().
 import type { Browser } from "puppeteer" with { "resolution-mode": "import" }
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
+import { nestOptionLines } from "../../../domain/order/nestOptionLines"
 import { t } from "../../../i18n"
 import { httpStatus } from "../../../shared/httpStatus"
 import { logger } from "../../../shared/logger"
@@ -66,6 +67,10 @@ interface InvoiceOrder {
 	paymentInstructions: string | null
 	shippingMethodTitle: string | null
 	items: {
+		/// Needed to match an option line to the line it belongs under. Without
+		/// it the only available test is "has a parent at all", which puts every
+		/// option under every product.
+		id: string
 		sku: string
 		name: string
 		attributes: string[]
@@ -108,10 +113,8 @@ const renderHtml = (order: InvoiceOrder, company: CompanyDetails, locale: Locale
 	const billing = order.addresses.find((a) => a.type === "BILLING")
 	const shipping = order.addresses.find((a) => a.type === "SHIPPING")
 
-	const rows = order.items
-		.filter((i) => !i.parentItemId)
-		.map((item) => {
-			const options = order.items.filter((o) => o.parentItemId)
+	const rows = nestOptionLines(order.items)
+		.map(({ line: item, options }) => {
 			const render = (i: typeof item, isOption: boolean) => `
         <tr>
           <td style="padding:8px 6px;border-bottom:1px solid #eee;${isOption ? "padding-left:22px;color:#555;" : ""}">
@@ -253,6 +256,7 @@ const loadOrder = async (id: string): Promise<InvoiceOrder> => {
 		paymentInstructions: row.paymentInstructions,
 		shippingMethodTitle: row.shippingMethodTitle,
 		items: row.items.map((i) => ({
+			id: i.id,
 			sku: i.sku,
 			name: i.name,
 			attributes: i.attributes,

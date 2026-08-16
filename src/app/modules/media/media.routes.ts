@@ -2,6 +2,7 @@ import { Router } from "express"
 import multer from "multer"
 import { MAX_FILE_BYTES } from "./media.constant"
 import { auth } from "../../middlewares/auth"
+import { uploadLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { MediaController } from "./media.controller"
 import { MediaValidation } from "./media.validation"
@@ -28,12 +29,15 @@ router.get(
 router.post(
 	"/images",
 	auth("ADMIN", "SHOP_MANAGER"),
+	uploadLimiter,
 	upload.single("file"),
 	MediaController.uploadImage
 )
 
-// Customer design files. Any signed-in customer may upload their own artwork.
-router.post("/files", auth(), upload.single("file"), MediaController.uploadFile)
+// Customer design files. Any signed-in customer may upload their own artwork —
+// rate limited, because this is the one endpoint where a request costs the shop
+// storage rather than a moment of CPU.
+router.post("/files", auth(), uploadLimiter, upload.single("file"), MediaController.uploadFile)
 
 router.get(
 	"/:id/url",

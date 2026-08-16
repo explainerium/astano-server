@@ -6,15 +6,30 @@
 import "dotenv/config"
 import { z } from "zod"
 
+/**
+ * The signing placeholders, named so the production guard below can recognise
+ * them rather than repeating the strings.
+ *
+ * They exist so a developer can clone the repository and have a working login
+ * without generating anything. That convenience is also the danger: they are
+ * published here, so a deployment that reaches production still holding one is
+ * a deployment where anybody who has read this file can mint an admin token.
+ */
+export const DEV_JWT_SECRETS = {
+	access: "dev-access-secret-change-me",
+	refresh: "dev-refresh-secret-change-me",
+} as const
+
 const envSchema = z.object({
 	NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 	PORT: z.coerce.number().int().positive().default(5000),
 
 	DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
-	// Auth — placeholders are fine in development, never in production.
-	JWT_ACCESS_SECRET: z.string().min(1).default("dev-access-secret-change-me"),
-	JWT_REFRESH_SECRET: z.string().min(1).default("dev-refresh-secret-change-me"),
+	// Auth — placeholders are fine in development, never in production. Enforced
+	// at the bottom of this file, not merely asked for in this comment.
+	JWT_ACCESS_SECRET: z.string().min(1).default(DEV_JWT_SECRETS.access),
+	JWT_REFRESH_SECRET: z.string().min(1).default(DEV_JWT_SECRETS.refresh),
 	JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
 	JWT_REFRESH_EXPIRES_IN: z.string().default("30d"),
 
@@ -132,6 +147,29 @@ const parsed = envSchema
 		message: "COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers drop the cookie otherwise)",
 		path: ["COOKIE_SAMESITE"],
 	})
+	/**
+	 * A published signing secret is a forged admin session, so production refuses
+	 * to start on one.
+	 *
+	 * At boot rather than at first use, unlike CREDENTIALS_KEY. That one guards a
+	 * feature — a shop with no payment gateway is entitled to run without it — but
+	 * every request in the application is authenticated with these, so there is no
+	 * deployment that could legitimately continue. Render's blueprint generates
+	 * both; this is what covers the VPS move, where nothing generates anything.
+	 */
+	.refine(
+		(values) =>
+			values.NODE_ENV !== "production" ||
+			(values.JWT_ACCESS_SECRET !== DEV_JWT_SECRETS.access &&
+				values.JWT_REFRESH_SECRET !== DEV_JWT_SECRETS.refresh),
+		{
+			message:
+				"JWT_ACCESS_SECRET / JWT_REFRESH_SECRET are still the development placeholders, " +
+				"which are published in this repository. Generate real ones (openssl rand -hex 32) " +
+				"and set them in the hosting dashboard.",
+			path: ["JWT_ACCESS_SECRET"],
+		}
+	)
 	.safeParse(process.env)
 
 if (!parsed.success) {

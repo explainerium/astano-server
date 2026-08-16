@@ -1,6 +1,7 @@
 import Decimal from "decimal.js"
 import type { Prisma, QuoteStatus } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
+import { planMerge } from "../../../domain/basket/mergePlan"
 import { applyMoqFloor, getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
 import { t } from "../../../i18n"
 import { notifyStaff, sendQuoteAnswered, sendQuoteSubmitted } from "../../../helpers/mailer"
@@ -132,25 +133,64 @@ const resolveBasket = async (
 						data: { userId: owner.userId, token: null, expiresAt: null },
 					})
 				} else {
+					/*
+					 * The same plan the cart merges by — see domain/basket/mergePlan.ts.
+					 *
+					 * The drawings used to be dropped here: a guest attached a file,
+					 * signed in to submit the request, and arrived at a basket that had
+					 * quietly lost the one thing the request was about. Nobody notices
+					 * until staff ask what shape it is supposed to be.
+					 *
+					 * A basket line never has options, so the plan's copies are always
+					 * top-level; the shape is shared with the cart because the rule is.
+					 */
+					const plan = planMerge(
+						guest.items.map((i) => ({
+							id: i.id,
+							variantId: i.variantId,
+							quantity: i.quantity,
+							fileCount: i.files.length,
+						})),
+						mine.items.map((i) => ({
+							id: i.id,
+							variantId: i.variantId,
+							quantity: i.quantity,
+							fileCount: i.files.length,
+						}))
+					)
+
+					const guestItems = new Map(guest.items.map((i) => [i.id, i]))
+
 					await prisma.$transaction(async (tx) => {
-						for (const item of guest.items) {
-							const existing = mine!.items.find((i) => i.variantId === item.variantId)
-							if (existing) {
-								await tx.quoteBasketItem.update({
-									where: { id: existing.id },
-									data: { quantity: existing.quantity + item.quantity },
-								})
-							} else {
-								await tx.quoteBasketItem.create({
-									data: {
-										basketId: mine!.id,
-										variantId: item.variantId,
-										quantity: item.quantity,
-										note: item.note,
-									},
-								})
-							}
+						for (const step of plan.increments) {
+							// `increment` rather than a total from the row as it was read
+							// before the loop: two guest lines landing on the same existing
+							// one would each add to the same stale quantity.
+							await tx.quoteBasketItem.update({
+								where: { id: step.targetId },
+								data: { quantity: { increment: step.quantity } },
+							})
 						}
+
+						for (const step of plan.copies) {
+							const item = guestItems.get(step.source.id)!
+
+							await tx.quoteBasketItem.create({
+								data: {
+									basketId: mine!.id,
+									variantId: item.variantId,
+									quantity: item.quantity,
+									note: item.note,
+									files: {
+										create: item.files.map((f, index) => ({
+											assetId: f.assetId,
+											sortOrder: index,
+										})),
+									},
+								},
+							})
+						}
+
 						await tx.quoteBasket.delete({ where: { id: guest.id } })
 					})
 				}

@@ -26,8 +26,11 @@ const price: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
 		message: t("common.ok", req.locale),
+		// userId as well as role: a customer ladder is negotiated with a person,
+		// so without it the configurator quotes the catalogue price to a dealer
+		// the cart then charges the agreed one.
 		data: await BundleService.price(
-			{ role: req.user?.role, status: req.user?.status },
+			{ userId: req.user?.sub, role: req.user?.role, status: req.user?.status },
 			req.body,
 			req.locale
 		),
@@ -45,7 +48,7 @@ const addToCart: RequestHandler = catchAsync(async (req, res) => {
 
 	await BundleService.addToCart(
 		{ userId: owner.userId, cartId: cart.id },
-		{ role: owner.role, status: owner.status },
+		{ userId: owner.userId, role: owner.role, status: owner.status },
 		req.body,
 		req.locale
 	)

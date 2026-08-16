@@ -118,3 +118,49 @@ export const resolveTax = (input: ResolveTaxInput): ResolvedTax => {
 		unconfigured: false,
 	}
 }
+
+/**
+ * Combines several resolutions into the one breakdown an invoice prints.
+ *
+ * A basket can need more than one: goods at the standard rate, goods at a
+ * reduced one, and the delivery charge, each resolved against the rates of the
+ * class that governs it. They are separate calls because they are separate
+ * amounts at separate rates — but the customer is owed a single set of totals.
+ *
+ * Lines that share a name and a rate are added together rather than listed
+ * twice, because "MwSt 19%" appearing on two rows of one invoice reads as an
+ * error even when both rows are right.
+ *
+ * `unconfigured` and `reverseCharged` both spread: one destination with no rate
+ * entered is enough to refuse the order, and one reverse-charged line is enough
+ * for the invoice to have to say so. No resolutions at all is not unconfigured
+ * — a basket with nothing taxable in it is an answer, not a missing one.
+ */
+export const mergeTax = (parts: readonly ResolvedTax[]): ResolvedTax => {
+	const byRate = new Map<string, TaxLine>()
+	let total = new Decimal(0)
+
+	for (const part of parts) {
+		total = total.plus(new Decimal(part.totalTax))
+
+		for (const line of part.lines) {
+			const key = `${line.name}:${line.ratePercent}`
+			const seen = byRate.get(key)
+
+			if (!seen) {
+				byRate.set(key, { ...line })
+				continue
+			}
+
+			seen.taxableBase = new Decimal(seen.taxableBase).plus(line.taxableBase).toFixed(2)
+			seen.amount = new Decimal(seen.amount).plus(line.amount).toFixed(2)
+		}
+	}
+
+	return {
+		lines: [...byRate.values()],
+		totalTax: round(total).toFixed(2),
+		reverseCharged: parts.some((p) => p.reverseCharged),
+		unconfigured: parts.some((p) => p.unconfigured),
+	}
+}

@@ -195,5 +195,47 @@ describe("resolvePrice", () => {
 			expect(range.quoteOnly).toBe(true)
 			expect(range.min).toBeNull()
 		})
+
+		/**
+		 * The shop enters one ladder and expects every role to follow it, which
+		 * `pickTiers` already arranged for the cart. The range read the picked
+		 * row's own rungs instead, so a Retail customer was advertised a single
+		 * price on the archive and then charged the guest ladder's discount at
+		 * checkout — the two screens disagreeing that risk #1 is about.
+		 */
+		it("follows the same role fallback for the ladder as the price does", () => {
+			const guestWithLadder: RolePriceInput = {
+				role: "GUEST",
+				basePrice: "12.0000",
+				tiers: [{ minQuantity: 500, type: "FIXED_PRICE", value: "9.0000" }],
+			}
+			// Retail has a price of its own and no rungs — the common case.
+			const retailNoLadder: RolePriceInput = { role: "B2C", basePrice: "10.0000" }
+
+			const range = resolvePriceRange({
+				role: "B2C",
+				productPrices: [guestWithLadder, retailNoLadder],
+			})
+
+			expect(money(range.max)).toBe("10.00")
+			expect(money(range.min)).toBe("9.00")
+		})
+
+		it("reaches the deepest rung a variant ladder defines", () => {
+			const range = resolvePriceRange({
+				role: "B2C",
+				productPrices,
+				variantPrices: [
+					{
+						role: "B2C",
+						basePrice: "9.0000",
+						tiers: [{ minQuantity: 2000, type: "FIXED_PRICE", value: "6.0000" }],
+					},
+				],
+			})
+
+			expect(money(range.max)).toBe("9.00")
+			expect(money(range.min)).toBe("6.00")
+		})
 	})
 })

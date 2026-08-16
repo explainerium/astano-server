@@ -1,6 +1,11 @@
 import Decimal from "decimal.js"
 import { getEffectiveMoq, isBelowMoq } from "../moq/getEffectiveMoq"
-import { resolvePrice, type RolePriceInput } from "../pricing/resolvePrice"
+import {
+	resolvePrice,
+	type RolePriceInput,
+	type TierInput,
+	type TierSource,
+} from "../pricing/resolvePrice"
 import type { PricingRole } from "../pricing/effectiveRole"
 
 /**
@@ -38,6 +43,21 @@ export interface ConfigurableLine {
 	variantPrices?: RolePriceInput[]
 	/// Extra discount for taking this option with the main product.
 	discountPercent?: Decimal | string | number | null
+
+	/**
+	 * The ladders that do not live on the product — the customer's negotiated
+	 * one and the categories'.
+	 *
+	 * Handed in rather than looked up, because this file is pure. Passing them
+	 * matters: without them the configurator quoted a dealer the catalogue price
+	 * and the cart then charged the agreed one, which is exactly the
+	 * screen-disagrees-with-screen failure resolvePrice exists to prevent.
+	 * Same shape resolvePrice takes, because they go straight to it.
+	 */
+	customerTiers?: TierInput[]
+	categoryTiers?: TierInput[]
+	categoryQuantity?: number
+	tierPriority?: TierSource[]
 }
 
 export interface PricedLine {
@@ -85,6 +105,10 @@ const priceLine = (line: ConfigurableLine, role: PricingRole, now?: Date): Price
 		quantity: line.quantity,
 		productPrices: line.productPrices,
 		variantPrices: line.variantPrices,
+		customerTiers: line.customerTiers,
+		categoryTiers: line.categoryTiers,
+		categoryQuantity: line.categoryQuantity,
+		tierPriority: line.tierPriority,
 		now,
 	})
 

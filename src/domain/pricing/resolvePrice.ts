@@ -353,8 +353,24 @@ export const resolvePriceRange = (
 ): { min: Decimal | null; max: Decimal | null; quoteOnly: boolean } => {
 	if (input.quoteEnabled) return { min: null, max: null, quoteOnly: true }
 
-	const picked = pickRow(input.variantPrices, input.role) ?? pickRow(input.productPrices, input.role)
+	const variant = pickRow(input.variantPrices, input.role)
+	const picked = variant ?? pickRow(input.productPrices, input.role)
 	if (!picked) return { min: null, max: null, quoteOnly: false }
+
+	/**
+	 * The ladder the price will actually be resolved against, fallback included.
+	 *
+	 * Reading `picked.row.tiers` directly was the same mistake `pickTiers` exists
+	 * to prevent, one layer up: a Retail row with no rungs of its own borrows the
+	 * guest ladder at checkout, but the range never learned that and advertised a
+	 * single price. The shop enters one ladder and expects it to be followed
+	 * everywhere, so the range has to follow the same chain the cart does.
+	 */
+	const ladder = pickTiers(
+		variant ? input.variantPrices : input.productPrices,
+		picked.row,
+		picked.role
+	)
 
 	/**
 	 * The top of the range is the deepest rung *any* eligible ladder reaches.
@@ -364,7 +380,7 @@ export const resolvePriceRange = (
 	 * wrong as one that overstates it.
 	 */
 	const highestRung = [
-		...(picked.row.tiers ?? []),
+		...(ladder ?? []),
 		...(input.customerTiers ?? []),
 		...(input.categoryTiers ?? []),
 	].reduce((max, t) => Math.max(max, t.minQuantity), 1)

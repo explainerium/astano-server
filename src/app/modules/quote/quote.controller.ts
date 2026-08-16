@@ -198,7 +198,10 @@ const setBasketFiles: RequestHandler = catchAsync(async (req, res) => {
 	const files = await ArtworkService.setBasketItemFiles(
 		req.params.id as string,
 		req.body.assetIds,
-		req.user?.sub
+		req.user?.sub,
+		// An unclaimed basket is addressed only by this cookie, so it is what
+		// proves the line belongs to the caller.
+		req.cookies?.[QUOTE_BASKET_COOKIE] as string | undefined
 	)
 
 	sendResponse(res, {

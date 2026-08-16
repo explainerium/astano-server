@@ -98,7 +98,10 @@ const setFiles: RequestHandler = catchAsync(async (req, res) => {
 	const files = await ArtworkService.setCartItemFiles(
 		req.params.id as string,
 		req.body.assetIds,
-		req.user?.sub
+		req.user?.sub,
+		// An unclaimed cart is addressed only by this cookie, so it is what proves
+		// the line belongs to the caller.
+		req.cookies?.[CART_COOKIE] as string | undefined
 	)
 
 	sendResponse(res, {

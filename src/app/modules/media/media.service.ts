@@ -5,6 +5,7 @@ import type { Prisma } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
+import { logger } from "../../../shared/logger"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
 import {
@@ -327,6 +328,77 @@ const remove = async (id: string): Promise<void> => {
 	await prisma.asset.delete({ where: { id } })
 }
 
+/**
+ * Customer artwork that was uploaded and never attached to anything.
+ *
+ * The upload endpoint writes the asset first and the line references it second,
+ * so every abandoned upload — a wrong file, a closed tab, a line removed before
+ * checkout — left a row and a stored object with nothing pointing at them and
+ * nothing to ever clean them up. Storage only grew, and it grows in the bucket
+ * the shop pays for.
+ *
+ * Three deliberate limits on what it will touch:
+ *
+ *  • **PRIVATE and uploaded by somebody.** That is exactly what customer
+ *    artwork is. The catalogue's own media has no uploader and is managed from
+ *    the media library by hand.
+ *  • **Referenced by nothing** — not a cart line, a basket line, an order or a
+ *    quote. An order's reference is `SetNull`, so a swept asset would blank a
+ *    record of what production was sent; the count below is what stops that.
+ *  • **Older than the grace period.** A file is uploaded seconds before the
+ *    line that references it exists, and a sweep running in that gap would
+ *    delete a drawing out from under a customer mid-checkout.
+ */
+const ORPHAN_GRACE_DAYS = 7
+
+const sweepOrphanedArtwork = async (): Promise<number> => {
+	const cutoff = new Date(Date.now() - ORPHAN_GRACE_DAYS * 24 * 60 * 60 * 1000)
+
+	const orphans = await prisma.asset.findMany({
+		where: {
+			visibility: "PRIVATE",
+			uploadedById: { not: null },
+			createdAt: { lt: cutoff },
+			cartLines: { none: {} },
+			quoteBasketLines: { none: {} },
+			orderLines: { none: {} },
+			quoteLines: { none: {} },
+			// Artwork is never product media, but a row that somehow became both
+			// is one the media library owns and this must not decide about.
+			products: { none: {} },
+			featuredFor: { none: {} },
+			variantImageFor: { none: {} },
+		},
+		select: { id: true, storageKey: true, derivatives: true, visibility: true },
+		// Bounded so one sweep cannot spend an hour on a backlog; the next run
+		// takes the rest.
+		take: 500,
+	})
+
+	let removed = 0
+
+	for (const asset of orphans) {
+		const derivatives = (asset.derivatives ?? {}) as Record<string, string>
+
+		try {
+			for (const key of [asset.storageKey, ...Object.values(derivatives)]) {
+				await storage.delete(key, asset.visibility)
+			}
+		} catch (error) {
+			// A bucket that refuses one object must not stop the rest. The row
+			// stays, so the next sweep tries again rather than leaving a database
+			// record pointing at a file that may or may not still exist.
+			logger.warn({ err: error, assetId: asset.id }, "could not delete an orphaned upload")
+			continue
+		}
+
+		await prisma.asset.delete({ where: { id: asset.id } })
+		removed += 1
+	}
+
+	return removed
+}
+
 // ── Folders (the 37-folder admin library from the old site, §7.1) ────────────
 
 const listFolders = async () => {
@@ -379,6 +451,7 @@ export const MediaService = {
 	getSignedDownload,
 	updateMeta,
 	remove,
+	sweepOrphanedArtwork,
 	listFolders,
 	createFolder,
 	removeFolder,

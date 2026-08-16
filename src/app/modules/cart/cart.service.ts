@@ -1,6 +1,7 @@
 import Decimal from "decimal.js"
 import type { Prisma } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
+import { planMerge } from "../../../domain/basket/mergePlan"
 import { applyMoqFloor, getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import { resolvePrice, type RolePriceInput } from "../../../domain/pricing/resolvePrice"
@@ -258,27 +259,76 @@ const resolveCart = async (
 					})
 					merged = true
 				} else {
-					await prisma.$transaction(async (tx) => {
-						for (const item of guestCart.items) {
-							const existing = userCart!.items.find(
-								(i) => i.variantId === item.variantId && i.parentItemId === item.parentItemId
-							)
+					/*
+					 * What crosses over and what merges is decided by `planMerge` —
+					 * the same rule the inquiry basket uses. It is a rule rather than a
+					 * loop because it was got wrong: option lines used to arrive with
+					 * their `parentItemId` dropped, so a configured cutter became a
+					 * cutter, an engraving and a box that no longer knew they belonged
+					 * together, and every attached drawing was left behind in the cart
+					 * being deleted.
+					 *
+					 * The plan orders parents before their options, so `moved` always
+					 * has the id an option needs by the time it is reached.
+					 */
+					const plan = planMerge(
+						guestCart.items.map((i) => ({
+							id: i.id,
+							variantId: i.variantId,
+							quantity: i.quantity,
+							fileCount: i.files.length,
+							parentItemId: i.parentItemId,
+						})),
+						userCart.items.map((i) => ({
+							id: i.id,
+							variantId: i.variantId,
+							quantity: i.quantity,
+							fileCount: i.files.length,
+							parentItemId: i.parentItemId,
+						}))
+					)
 
-							if (existing) {
-								await tx.cartItem.update({
-									where: { id: existing.id },
-									data: { quantity: existing.quantity + item.quantity },
-								})
-							} else {
-								await tx.cartItem.create({
-									data: {
-										cartId: userCart!.id,
-										variantId: item.variantId,
-										quantity: item.quantity,
-									},
-								})
-							}
+					const guestItems = new Map(guestCart.items.map((i) => [i.id, i]))
+
+					await prisma.$transaction(async (tx) => {
+						for (const step of plan.increments) {
+							// `increment` rather than a total worked out from the row as it
+							// was read before the loop began: two guest lines landing on the
+							// same existing one would each add to the same stale quantity,
+							// and the second write would undo the first.
+							await tx.cartItem.update({
+								where: { id: step.targetId },
+								data: { quantity: { increment: step.quantity } },
+							})
 						}
+
+						const moved = new Map<string, string>()
+
+						for (const step of plan.copies) {
+							const item = guestItems.get(step.source.id)!
+
+							const created = await tx.cartItem.create({
+								data: {
+									cartId: userCart!.id,
+									variantId: item.variantId,
+									quantity: item.quantity,
+									parentItemId: step.parentSourceId
+										? (moved.get(step.parentSourceId) ?? null)
+										: null,
+									// The drawing moves with the line. One lost at sign-in is
+									// one nobody notices until production asks for it.
+									files: {
+										create: item.files.map((f, index) => ({
+											assetId: f.assetId,
+											sortOrder: index,
+										})),
+									},
+								},
+							})
+
+							moved.set(item.id, created.id)
+						}
+
 						await tx.cart.delete({ where: { id: guestCart.id } })
 					})
 					merged = true
@@ -323,8 +373,35 @@ const resolveCart = async (
 const roleOf = (owner: CartOwner): PricingRole =>
 	effectiveRole((owner.role ?? null) as never, (owner.status ?? null) as never)
 
-const get = async (owner: CartOwner, locale: LocaleCode) => {
-	const { cart, token } = await resolveCart(owner)
+/**
+ * Reads a cart back and prices it. Every path that returns a cart ends here.
+ *
+ * It exists because four of the five did not. `get` loaded the customer's and
+ * the categories' ladders and the other four passed `undefined` in their place,
+ * so changing a quantity answered with the undiscounted price and only the
+ * refetch that followed put it right. One customer-visible flicker in this
+ * frontend — and simply the wrong number to any other caller, which is what an
+ * API contract has to mean.
+ *
+ * `stockRules` is threaded in where the caller has already read the settings,
+ * so an add does not pay for the same round trip twice.
+ */
+const readAndPrice = async (
+	cartId: string,
+	owner: CartOwner,
+	locale: LocaleCode,
+	stockRules?: StockRules
+) => {
+	const cart = await prisma.cart.findUnique({ where: { id: cartId }, include: cartInclude })
+
+	if (!cart) {
+		throw new ApiError(httpStatus.NOT_FOUND, "That cart no longer exists", {
+			messageKey: "cart.itemNotFound",
+		})
+	}
+
+	const role = roleOf(owner)
+
 	/**
 	 * Loaded once per read, for the whole cart.
 	 *
@@ -332,26 +409,24 @@ const get = async (owner: CartOwner, locale: LocaleCode) => {
 	 * resolved line by line — and loading per line would turn a twenty-line cart
 	 * into forty queries.
 	 */
-	const role = roleOf(owner)
-	const externalTiers = await loadExternalTiers({
-		productIds: [...new Set(cart.items.map((i) => i.variant.productId))],
-		role,
-		userId: owner.userId,
-		cartId: cart.id,
-		withCategoryQuantities: true,
-	})
-
-	return {
-		cart: view(
-			cart,
-			locale,
+	const [bundleDiscounts, externalTiers, rules] = await Promise.all([
+		loadBundleDiscounts(cart.items),
+		loadExternalTiers({
+			productIds: [...new Set(cart.items.map((i) => i.variant.productId))],
 			role,
-			await loadBundleDiscounts(cart.items),
-			externalTiers,
-			readStockRules(await SettingService.getMap())
-		),
-		token,
-	}
+			userId: owner.userId,
+			cartId: cart.id,
+			withCategoryQuantities: true,
+		}),
+		stockRules ? Promise.resolve(stockRules) : SettingService.getMap().then(readStockRules),
+	])
+
+	return view(cart, locale, role, bundleDiscounts, externalTiers, rules)
+}
+
+const get = async (owner: CartOwner, locale: LocaleCode) => {
+	const { cart, token } = await resolveCart(owner)
+	return { cart: await readAndPrice(cart.id, owner, locale), token }
 }
 
 const addItem = async (
@@ -383,6 +458,22 @@ const addItem = async (
 	if (variant.product.quoteEnabled) {
 		throw new ApiError(httpStatus.CONFLICT, "This product is available only through a quote", {
 			messageKey: "cart.quoteOnly",
+		})
+	}
+
+	/*
+	 * An option has to hang off a line in THIS cart.
+	 *
+	 * A parent id belonging to somebody else's cart still satisfies the foreign
+	 * key, and the row it creates is invisible: the view lists top-level lines
+	 * and nests options under their own parent, so a line whose parent is not
+	 * here appears under neither — while the subtotal, which sums every row,
+	 * charges for it anyway. A line the customer can be billed for and cannot
+	 * see is worth one lookup to prevent.
+	 */
+	if (payload.parentItemId && !cart.items.some((i) => i.id === payload.parentItemId)) {
+		throw new ApiError(httpStatus.NOT_FOUND, "That line is not in your cart", {
+			messageKey: "cart.itemNotFound",
 		})
 	}
 
@@ -452,11 +543,7 @@ const addItem = async (
 		data: { expiresAt: cart.userId ? null : expiryDate() },
 	})
 
-	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return {
-		cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items), undefined, stockRules),
-		token,
-	}
+	return { cart: await readAndPrice(cart.id, owner, locale, stockRules), token }
 }
 
 const updateItem = async (
@@ -477,8 +564,7 @@ const updateItem = async (
 	// Quantity 0 means remove — the usual meaning of typing 0 into a cart field.
 	if (quantity === 0) {
 		await prisma.cartItem.delete({ where: { id: itemId } })
-		const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-		return { cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items)), token, adjusted: false }
+		return { cart: await readAndPrice(cart.id, owner, locale), token, adjusted: false }
 	}
 
 	const moq = getEffectiveMoq({
@@ -502,12 +588,7 @@ const updateItem = async (
 
 	await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: finalQuantity } })
 
-	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return {
-		cart: view(fresh!, locale, roleOf(owner), await loadBundleDiscounts(fresh!.items), undefined, stockRules),
-		token,
-		adjusted,
-	}
+	return { cart: await readAndPrice(cart.id, owner, locale, stockRules), token, adjusted }
 }
 
 const removeItem = async (owner: CartOwner, itemId: string, locale: LocaleCode) => {
@@ -523,36 +604,14 @@ const removeItem = async (owner: CartOwner, itemId: string, locale: LocaleCode) 
 	// Option lines cascade with their parent (§4.6) — the database FK handles it.
 	await prisma.cartItem.delete({ where: { id: itemId } })
 
-	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return {
-		cart: view(
-			fresh!,
-			locale,
-			roleOf(owner),
-			await loadBundleDiscounts(fresh!.items),
-			undefined,
-			readStockRules(await SettingService.getMap())
-		),
-		token,
-	}
+	return { cart: await readAndPrice(cart.id, owner, locale), token }
 }
 
 const clear = async (owner: CartOwner, locale: LocaleCode) => {
 	const { cart, token } = await resolveCart(owner)
 	await prisma.cartItem.deleteMany({ where: { cartId: cart.id } })
 
-	const fresh = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude })
-	return {
-		cart: view(
-			fresh!,
-			locale,
-			roleOf(owner),
-			await loadBundleDiscounts(fresh!.items),
-			undefined,
-			readStockRules(await SettingService.getMap())
-		),
-		token,
-	}
+	return { cart: await readAndPrice(cart.id, owner, locale), token }
 }
 
 export const CartService = { get, addItem, updateItem, removeItem, clear }

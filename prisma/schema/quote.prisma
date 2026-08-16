@@ -75,8 +75,16 @@ model QuoteBasketItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([basketId, variantId])
+  /// Deliberately NOT unique on (basketId, variantId), and `CartItem` is not
+  /// either.
+  ///
+  /// It was, and that contradicted the rule the service has always stated: a
+  /// line carrying a drawing is its own line. Two of the same cutter shape cut
+  /// to two different drawings are two different things to quote — which is
+  /// most of what this shop is asked for — and the constraint turned the second
+  /// one into a unique-violation the customer saw as "duplicate entry".
   @@index([basketId])
+  @@index([basketId, variantId])
   @@map("quote_basket_items")
 }
 
