@@ -13,9 +13,32 @@ The decisions behind `../vercel.json`, which has nowhere to put a comment:
 | `buildCommand` → `npx prisma generate` | The generated client is not committed and Vercel builds from a clean cache. `npx`, not a bare `prisma`: a build command runs in a plain shell, which does not have `node_modules/.bin` on its PATH the way an npm script does — a bare `prisma` exits 127, "command not found". |
 | `buildCommand` → `npm run build` | We compile, Vercel does not. See below. |
 | `buildCommand` → `rm -rf node_modules/typescript` | **This is not a hack, it is a workaround for a bug in Vercel's own builder.** See below. |
+| `buildCommand` → `rm -rf dist node_modules/sanitize-html node_modules/htmlparser2` | Deletes everything the bundle replaced, so nothing can quietly load it. See below. |
 | `installCommand: npm ci --include=dev` | Vercel sets `NODE_ENV=production` for the build, and npm then skips devDependencies — where `prisma` and `typescript` both live. Without this the build fails looking for a Prisma CLI that was never installed. `render.yaml` carries the same flag for the same reason. |
 | **No `prisma migrate deploy`**  | Every preview deployment would otherwise migrate the production database. Migrations are run deliberately: `npx prisma migrate deploy` from a machine that means it.                           |
 | `crons`                         | `node-cron` needs a process that stays alive and Vercel has none, so the schedule lives with the platform and calls `GET /api/v1/cron/run`.                                                    |
+
+## Why the unbundled build is deleted after bundling
+
+`dist/` and the two packages the bundle inlined (`sanitize-html`, and the
+ESM-only `htmlparser2` it requires) are removed once `dist-bundle/app.js`
+exists.
+
+Not tidiness. `ERR_REQUIRE_ESM` from `node_modules/sanitize-html/index.js`
+survived several deployments *after* the bundle was in place — and it cannot
+come from the bundle, where that `require` no longer exists. Something was still
+reaching the unbundled code. Rather than keep guessing which layer (a restored
+build cache, a stale bytecode snapshot, a second traced entry point), the
+unbundled code is simply not there any more.
+
+That also makes the failure legible if it ever happens again: a load of the old
+path now fails with `MODULE_NOT_FOUND`, which `api/index.js` catches and serves
+as a 503 naming the module — instead of an ESM error that reads like the bundle
+did not work.
+
+Both are safe to delete. The bundle inlines `sanitize-html` outright, and
+nothing external references it — verified with
+`grep -c 'require("sanitize-html")' dist-bundle/app.js`, which is zero.
 
 ## Why TypeScript is deleted after the build
 
