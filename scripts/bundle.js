@@ -17,9 +17,21 @@
  * for the platform whose Node we do not control.
  */
 const esbuild = require("esbuild")
+const fs = require("fs")
 const path = require("path")
 
 const ROOT = path.join(__dirname, "..")
+const OUT = path.join(ROOT, "dist-bundle")
+
+/*
+ * Emptied first.
+ *
+ * A build cache can restore an output directory from an earlier deployment, and
+ * a bundle left over from before is indistinguishable from one just built —
+ * right up to the moment it runs the old code and reports an error that was
+ * fixed. Starting from nothing costs milliseconds and removes the question.
+ */
+fs.rmSync(OUT, { recursive: true, force: true })
 
 /**
  * Left out of the bundle, and why.
@@ -45,7 +57,7 @@ const EXTERNAL = [
 esbuild
 	.build({
 		entryPoints: [path.join(ROOT, "dist", "app.js")],
-		outfile: path.join(ROOT, "dist-bundle", "app.js"),
+		outfile: path.join(OUT, "app.js"),
 		bundle: true,
 		platform: "node",
 		// The floor Vercel might give us, not the version we develop on. Setting
