@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "prisma generate",
-  "installCommand": "npm ci",
+  "buildCommand": "npx prisma generate",
+  "installCommand": "npm ci --include=dev",
   "regions": ["fra1"],
   "functions": {
     "api/index.ts": {
