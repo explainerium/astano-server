@@ -13,7 +13,20 @@ import { t } from "../../src/i18n"
  * That is a mistake worth one test rather than one incident.
  */
 
-const catalogues = { en, de } as Record<string, Record<string, unknown>>
+/**
+ * Widened once, here.
+ *
+ * A JSON import is typed as an object literal with one property per key, so
+ * indexing it with a plain `string` is an implicit `any` — TS7053. Whether that
+ * is reported depends on the compiler: the one this repo uses lets it pass, and
+ * the one Vercel's builder falls back to does not, so it surfaced as a failed
+ * deployment rather than a failed typecheck. Two names either way, and now both
+ * compilers agree.
+ */
+const EN: Record<string, string> = en
+const DE: Record<string, string> = de
+
+const catalogues: Record<string, Record<string, unknown>> = { en: EN, de: DE }
 
 describe("message catalogues", () => {
 	for (const [locale, catalogue] of Object.entries(catalogues)) {
@@ -27,8 +40,8 @@ describe("message catalogues", () => {
 	}
 
 	it("the two catalogues carry exactly the same keys", () => {
-		const enKeys = Object.keys(en).sort()
-		const deKeys = Object.keys(de).sort()
+		const enKeys = Object.keys(EN).sort()
+		const deKeys = Object.keys(DE).sort()
 
 		expect(deKeys.filter((k) => !enKeys.includes(k))).toEqual([])
 		expect(enKeys.filter((k) => !deKeys.includes(k))).toEqual([])
@@ -37,7 +50,7 @@ describe("message catalogues", () => {
 	it("resolves a key rather than handing back the key", () => {
 		// The shape of the bug this file guards: a lookup that misses returns the
 		// key, which reads as a translation until somebody looks at it.
-		for (const key of Object.keys(en)) {
+		for (const key of Object.keys(EN)) {
 			expect(t(key, "en"), key).not.toBe(key)
 			expect(t(key, "de"), key).not.toBe(key)
 		}
@@ -48,8 +61,8 @@ describe("message catalogues", () => {
 		// means one of the two was edited without the other.
 		const placeholders = (value: string) => [...value.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort()
 
-		for (const key of Object.keys(en)) {
-			expect(placeholders(de[key] as string), key).toEqual(placeholders(en[key] as string))
+		for (const key of Object.keys(EN)) {
+			expect(placeholders(DE[key] ?? ""), key).toEqual(placeholders(EN[key] ?? ""))
 		}
 	})
 })

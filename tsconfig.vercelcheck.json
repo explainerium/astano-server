@@ -1,0 +1,21 @@
+{
+  "//": [
+    "Typechecks src AND tests, which tsconfig.json deliberately does not.",
+    "",
+    "The main config excludes tests/ so `npm run build` does not try to compile",
+    "them into dist/. That left the suite unchecked by any compiler other than",
+    "the editor's — and a type error in a test then failed a Vercel deploy,",
+    "because Vercel's builder scans the project with its own TypeScript and does",
+    "not read our exclude list.",
+    "",
+    "Run with the version Vercel falls back to, so its answer is known before a",
+    "deploy rather than after:",
+    "  npx -p typescript@5.9.3 tsc --noEmit -p tsconfig.vercelcheck.json"
+  ],
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*", "tests/**/*"],
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  }
+}

@@ -1,0 +1,10 @@
+# Kept out of the deployment.
+#
+# Vercel's builder typechecks the TypeScript it finds, with its own compiler
+# rather than ours — and it found the test suite, which `tsconfig.json`
+# excludes and which therefore had never been checked by that compiler. A type
+# error in a test failed the deploy of an application the test is not part of.
+#
+# Tests do not belong in a serverless bundle regardless. They are still run by
+# `npm test`, and still typechecked deliberately: see tsconfig.vercelcheck.json.
+tests/

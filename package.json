@@ -14,7 +14,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed:admin": "tsx prisma/seed/admin.seed.ts",
-    "build:bundle": "npm run build && node scripts/bundle.js"
+    "build:bundle": "npm run build && node scripts/bundle.js",
+    "typecheck:deploy": "tsc --noEmit -p tsconfig.vercelcheck.json"
   },
   "license": "UNLICENSED",
   "type": "commonjs",
