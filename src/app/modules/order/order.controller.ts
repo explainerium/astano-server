@@ -122,9 +122,25 @@ const addNote: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+/** Print files sent after the order was placed. */
+const attachArtwork: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("artwork.saved", req.locale),
+		data: await OrderService.attachArtwork(
+			req.user!.sub,
+			req.params.id as string,
+			req.params.itemId as string,
+			req.body.assetIds,
+			req.locale
+		),
+	})
+})
+
 export const OrderController = {
 	preview,
 	place,
+	attachArtwork,
 	listNotes,
 	addNote,
 	listMine,

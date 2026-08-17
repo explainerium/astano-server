@@ -103,6 +103,19 @@ export const updateStatusSchema = z.object({
 	}),
 })
 
+/**
+ * The whole set on a line, not an addition — the same shape the cart uses.
+ *
+ * A customer who attached the wrong drawing has to be able to take it off, and
+ * an add-only endpoint leaves that to a second endpoint nobody builds. The
+ * product's own limit is enforced in the service; 20 here only bounds what the
+ * parser will accept.
+ */
+export const setItemFilesSchema = z.object({
+	params: z.object({ id: z.string().uuid(), itemId: z.string().uuid() }),
+	body: z.object({ assetIds: z.array(z.string().uuid()).max(20).default([]) }),
+})
+
 export const OrderValidation = {
 	previewSchema,
 	placeOrderSchema,
@@ -110,4 +123,5 @@ export const OrderValidation = {
 	idSchema,
 	updateStatusSchema,
 	addNoteSchema,
+	setItemFilesSchema,
 }

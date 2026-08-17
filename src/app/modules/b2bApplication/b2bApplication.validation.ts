@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { SUPPORTED_LOCALES } from "../../../config/locales"
+import { requiresVatId } from "../../../domain/tax/euCountries"
 
 const countryCode = z.string().trim().toUpperCase().length(2, "Use a 2-letter ISO country code")
 
@@ -55,6 +56,29 @@ export const applySchema = z.object({
 		email2: z.string().max(500).optional(),
 	}),
 })
+	/**
+	 * The VAT ID is required of an EU business outside Germany, and of nobody
+	 * else — see domain/tax/euCountries.
+	 *
+	 * A `superRefine` rather than a required field, because whether it is
+	 * required depends on another answer on the same form. Attached to the path
+	 * so the error lands on the field the customer has to fix.
+	 *
+	 * The shop's own country is a setting, but reading it here would make this
+	 * schema asynchronous for a value that has been DE since the shop existed.
+	 * The default in `requiresVatId` is the shop's country; if that ever moves,
+	 * this is one call to change.
+	 */
+	.superRefine((values, ctx) => {
+		if (!requiresVatId(values.body.countryCode)) return
+		if (values.body.vatNumber?.trim()) return
+
+		ctx.addIssue({
+			code: "custom",
+			path: ["body", "vatNumber"],
+			message: "A VAT ID is required for businesses in the EU outside Germany",
+		})
+	})
 
 export const listSchema = z.object({
 	query: z.object({

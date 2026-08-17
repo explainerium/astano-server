@@ -81,7 +81,17 @@ const quote: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+/** The countries a customer may actually choose. Codes only — see the service. */
+const countries: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: { countries: await ShippingService.deliverableCountries() },
+	})
+})
+
 export const ShippingController = {
+	countries,
 	listZones,
 	getZone,
 	createZone,

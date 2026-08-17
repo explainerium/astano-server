@@ -326,5 +326,16 @@
 	"artwork.notAccepted": "Für dieses Produkt können keine Dateien hochgeladen werden.",
 	"artwork.tooMany": "Für dieses Produkt sind höchstens {max} Datei(en) möglich.",
 	"artwork.required": "Für dieses Produkt wird mindestens eine Datei benötigt.",
-	"order.lineArtworkRequired": "Für {sku} wird eine Druckdatei benötigt."
+	"order.lineArtworkRequired": "Für {sku} wird eine Druckdatei benötigt.",
+	"staff.orderArtwork.subject": "Druckdaten zu Bestellung {number}",
+	"staff.orderArtwork.title": "Druckdaten sind eingegangen",
+	"staff.orderArtwork.intro": "{name} hat {files} zu {line} in Bestellung {number} hochgeladen.",
+	"staff.orderArtwork.action": "Bestellung öffnen",
+	"order.lineNotFound": "Diese Position gehört nicht zu Ihrer Bestellung.",
+	"order.artworkClosed": "Für diese Bestellung können keine Dateien mehr hochgeladen werden. Bitte kontaktieren Sie uns.",
+	"email.b2bReceived.subject": "Ihre Händleranfrage ist eingegangen, {company}",
+	"email.b2bReceived.title": "Ihre Händleranfrage ist eingegangen",
+	"email.b2bReceived.intro": "Vielen Dank, {name} — wir haben die Händleranfrage für {company} erhalten und prüfen sie in Kürze.",
+	"email.b2bReceived.next": "Ihr Konto ist bereits angelegt und Sie können sich anmelden. Händlerpreise werden jedoch erst nach der Freigabe sichtbar. Wir melden uns per E-Mail, sobald es so weit ist.",
+	"email.b2bReceived.action": "Zu Ihrem Konto"
 }

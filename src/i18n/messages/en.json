@@ -326,5 +326,16 @@
 	"artwork.notAccepted": "This product does not take file uploads.",
 	"artwork.tooMany": "This product takes at most {max} file(s).",
 	"artwork.required": "This product needs at least one file before it can be ordered.",
-	"order.lineArtworkRequired": "{sku} needs a design file before it can be ordered."
+	"order.lineArtworkRequired": "{sku} needs a design file before it can be ordered.",
+	"staff.orderArtwork.subject": "Print files for order {number}",
+	"staff.orderArtwork.title": "Print files have arrived",
+	"staff.orderArtwork.intro": "{name} attached {files} to {line} on order {number}.",
+	"staff.orderArtwork.action": "Open the order",
+	"order.lineNotFound": "That line is not on your order.",
+	"order.artworkClosed": "This order can no longer take files. Please get in touch and we will help.",
+	"email.b2bReceived.subject": "We have your dealer application, {company}",
+	"email.b2bReceived.title": "Your dealer application has arrived",
+	"email.b2bReceived.intro": "Thank you, {name} — we have received the dealer application for {company} and will review it shortly.",
+	"email.b2bReceived.next": "Your account is already set up and you can sign in, but dealer prices only appear once the application has been approved. We will email you as soon as that happens.",
+	"email.b2bReceived.action": "Go to your account"
 }

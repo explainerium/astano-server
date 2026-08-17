@@ -64,6 +64,25 @@ const envSchema = z.object({
 		.default("http://localhost:5000")
 		.transform((value) => value.replace(/\/+$/, "")),
 
+	/**
+	 * Where the **shop** is, which is not where this API is.
+	 *
+	 * Every link in every email was built from `PUBLIC_BASE_URL`, and that is the
+	 * API's own origin — so a password reset arrived pointing at
+	 * `https://astano-api.…/reset-password?token=…`, which is not a page, does
+	 * not exist, and answers with a 404 in JSON. The same went for the welcome
+	 * mail, the quote links and the account links.
+	 *
+	 * Optional, and left empty it falls back to the first entry in
+	 * `CORS_ORIGINS` — which is by definition the site allowed to call this API,
+	 * and is right on every deployment that exists today. Set it explicitly when
+	 * several origins are allowed and the first is not the customer-facing one.
+	 */
+	SHOP_BASE_URL: z
+		.string()
+		.optional()
+		.transform((value) => value?.replace(/\/+$/, "")),
+
 	/// "local" writes to ./storage and is the development default. "r2" requires
 	/// the R2_* values below.
 	STORAGE_DRIVER: z.enum(["local", "r2"]).default("local"),
@@ -137,6 +156,14 @@ const parsed = envSchema
 		...values,
 		// Unset means "secure in production" — the previous hardcoded behaviour.
 		COOKIE_SECURE: values.COOKIE_SECURE ?? values.NODE_ENV === "production",
+		/*
+		 * Resolved once, here, so nothing downstream has to remember the fallback
+		 * — and so a deployment that never sets it still sends working links.
+		 */
+		SHOP_BASE_URL:
+			values.SHOP_BASE_URL ||
+			values.CORS_ORIGINS.split(",")[0]?.trim().replace(/\/+$/, "") ||
+			"http://localhost:3000",
 	}))
 	/**
 	 * A browser rejects `SameSite=None` outright unless the cookie is also

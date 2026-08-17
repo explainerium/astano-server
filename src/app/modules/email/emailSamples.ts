@@ -120,8 +120,25 @@ const SAMPLES: Record<EmailKind, (to: string, locale: LocaleCode) => Promise<voi
 	"staff-b2b-application": (to, locale) =>
 		staff(to, locale, "staff-b2b-application", "New dealer application: Muster GmbH", "New dealer application", "Muster GmbH (Anna Schmidt) applied for a dealer account."),
 
+	"b2b-received": (to, locale) =>
+		mailer.sendB2bReceived({ to, locale, name: CUSTOMER.name, company: "Muster GmbH" }),
 	"staff-low-stock": (to, locale) =>
 		staff(to, locale, "staff-low-stock", "Low stock: BB-6040-P", "Stock is running low", "Order AST-000128 brought these below their low-stock mark: BB-6040-P (2)"),
+	/*
+	 * Through the real sender rather than the generic `staff` helper, so the
+	 * preview shows the button — the whole point of this message is that staff
+	 * click through to the order instead of being handed the file.
+	 */
+	"staff-order-artwork": (to, locale) =>
+		mailer.notifyStaffOfArtwork({
+			to,
+			locale,
+			orderId: "00000000-0000-0000-0000-000000000000",
+			orderNumber: "AST-000128",
+			customerName: CUSTOMER.full,
+			lineName: "Individuelle Edelstahl Ausstechform",
+			fileNames: ["logo-outline.dxf", "logo-preview.pdf"],
+		}),
 }
 
 const status = (to: string, locale: LocaleCode, value: string) =>

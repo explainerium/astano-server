@@ -1,9 +1,12 @@
 import type { Prisma } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { resolveShipping, type ShippingMethodType } from "../../../domain/shipping/resolveShipping"
+import { readSellingRule } from "../../../domain/shop/sellingLocations"
+import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
+import { SettingService } from "../setting/setting.service"
 
 const zoneInclude = {
 	translations: true,
@@ -295,7 +298,52 @@ const quote = async (
 	}
 }
 
+/**
+ * The countries the shop will actually deliver to.
+ *
+ * Public, and the reason it exists is that there was no way to ask. The zones
+ * are an admin-only endpoint, so every country dropdown in the storefront read
+ * a list hardcoded in the frontend instead — and the two drifted, exactly as
+ * the comment above that list predicted. At the time of writing the hardcoded
+ * seventeen offered Latvia and Lithuania, which have no zone and therefore no
+ * delivery method, while five countries the shop had configured — Czechia,
+ * Estonia, Finland, Monaco, the Netherlands — could not be chosen at all.
+ *
+ * Three gates, in the order they actually apply:
+ *
+ *  1. the zone is active and has at least one active method — a zone with no
+ *     way to ship to it is a country the checkout will refuse;
+ *  2. the shop sells there (`selling.locations`);
+ *  3. the shop delivers there (`shipping.locations`), which is intersected
+ *     with the selling rule rather than replacing it.
+ *
+ * Codes only. The display name is the frontend's business — `Intl.DisplayNames`
+ * translates all of them for free, which is what the old list could not do.
+ */
+const deliverableCountries = async (): Promise<string[]> => {
+	const settings = await SettingService.getMap()
+	const selling = readSellingRule(settings)
+	const shipping = readShippingRule(settings)
+
+	const rows = await prisma.shippingZoneCountry.findMany({
+		where: {
+			zone: {
+				isActive: true,
+				// A zone nobody can be shipped through is not a destination on
+				// offer, however many countries are filed under it.
+				methods: { some: { isActive: true } },
+			},
+		},
+		select: { countryCode: true },
+	})
+
+	return [...new Set(rows.map((row) => row.countryCode.toUpperCase()))]
+		.filter((code) => canShipTo(shipping, selling, code))
+		.sort()
+}
+
 export const ShippingService = {
+	deliverableCountries,
 	listZones,
 	getZone,
 	createZone,

@@ -8,6 +8,7 @@ import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
 import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
 import { checkArtwork, readArtworkRules } from "../../../domain/product/artwork"
+import { acceptsLateArtwork } from "../../../domain/order/artworkWindow"
 import { nestOptionLines } from "../../../domain/order/nestOptionLines"
 import { rememberAddresses } from "./rememberAddress"
 import { ArtworkService } from "../media/artwork.service"
@@ -24,6 +25,7 @@ import { applyBundleDiscount, loadBundleDiscounts } from "../cart/bundleDiscount
 import { loadExternalTiers } from "../product/tierSources"
 import {
 	notifyStaff,
+	notifyStaffOfArtwork,
 	sendCustomerNote,
 	sendOrderConfirmation,
 	sendOrderStatusChanged,
@@ -78,7 +80,35 @@ const cartInclude = {
 } satisfies Prisma.CartInclude
 
 const orderInclude = {
-	items: { include: { files: { orderBy: { sortOrder: "asc" } } } },
+	items: {
+		include: {
+			files: {
+				orderBy: { sortOrder: "asc" },
+				/*
+				 * The asset behind the frozen row, where it still exists.
+				 *
+				 * The row is the record — name and all — and survives the upload
+				 * being deleted, which is why `fileName` is copied onto it. These
+				 * two are for the upload box in the customer's account, which lists
+				 * what is attached with its size and date the way it does everywhere
+				 * else. Null once the asset is gone, and the box leaves those alone.
+				 */
+				include: { asset: { select: { sizeBytes: true, createdAt: true } } },
+			},
+			/*
+			 * Reached through the variant because `OrderItem.productId` is a bare
+			 * column with no relation — the order freezes what was sold and points
+			 * back only informationally.
+			 *
+			 * Needed for one thing: how many drawings this line may still take. A
+			 * line whose variant has since been deleted reports none, which is the
+			 * honest answer — there is nothing left to read the rules from.
+			 */
+			variant: {
+				select: { product: { select: { artworkMaxFiles: true, artworkRequired: true } } },
+			},
+		},
+	},
 	addresses: true,
 	taxLines: true,
 	statusHistory: { orderBy: { createdAt: "asc" } },
@@ -88,6 +118,40 @@ type OrderRow = Prisma.OrderGetPayload<{ include: typeof orderInclude }>
 
 /** AST-000123 — formatted for display, stored as a plain integer. */
 const formatNumber = (n: number): string => `AST-${String(n).padStart(6, "0")}`
+
+/**
+ * One order line, main or option — both are products and both take drawings.
+ *
+ * Shared so an option cannot end up describing itself differently from the line
+ * above it. `canAttachArtwork` is the answer to "may this customer still send
+ * the file", which is two questions folded into one for the page's benefit: the
+ * product has to accept drawings at all, and the order has to be open to one
+ * (domain/order/artworkWindow).
+ */
+const lineView = (i: OrderRow["items"][number], status: OrderStatus) => {
+	const artwork = readArtworkRules(i.variant?.product)
+
+	return {
+		id: i.id,
+		sku: i.sku,
+		name: i.name,
+		attributes: i.attributes,
+		quantity: i.quantity,
+		unitPrice: i.unitPrice.toFixed(2),
+		lineTotal: i.lineTotal.toFixed(2),
+		// What production is to make this from. assetId is null once the upload
+		// is deleted; the name stays so the order still records it.
+		files: i.files.map((f) => ({
+			id: f.id,
+			assetId: f.assetId,
+			name: f.fileName,
+			sizeBytes: f.asset?.sizeBytes ?? null,
+			uploadedAt: f.asset?.createdAt ?? null,
+		})),
+		artwork,
+		canAttachArtwork: artwork.maxFiles > 0 && acceptsLateArtwork(status),
+	}
+}
 
 const view = (row: OrderRow, opts: { staff?: boolean } = {}) => ({
 	id: row.id,
@@ -141,25 +205,8 @@ const view = (row: OrderRow, opts: { staff?: boolean } = {}) => ({
 		])
 	),
 	items: nestOptionLines(row.items).map(({ line: i, options }) => ({
-		id: i.id,
-		sku: i.sku,
-		name: i.name,
-		attributes: i.attributes,
-		quantity: i.quantity,
-		unitPrice: i.unitPrice.toFixed(2),
-		lineTotal: i.lineTotal.toFixed(2),
-		// What production is to make this from. assetId is null once the
-		// upload is deleted; the name stays so the order still records it.
-		files: i.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
-		options: options.map((o) => ({
-			id: o.id,
-			sku: o.sku,
-			name: o.name,
-			quantity: o.quantity,
-			unitPrice: o.unitPrice.toFixed(2),
-			lineTotal: o.lineTotal.toFixed(2),
-			files: o.files.map((f) => ({ id: f.id, assetId: f.assetId, name: f.fileName })),
-		})),
+		...lineView(i, row.status),
+		options: options.map((o) => lineView(o, row.status)),
 	})),
 	taxLines: row.taxLines.map((t) => ({
 		name: t.name,
@@ -1080,9 +1127,139 @@ const addNote = async (
 const listNotes = async (orderId: string) =>
 	prisma.orderNote.findMany({ where: { orderId }, orderBy: { createdAt: "asc" } })
 
+/**
+ * A drawing sent after the order was placed.
+ *
+ * The client's rule is that print files may follow the order, and until now
+ * "follow" meant emailing them to the shop, where they never joined the order
+ * record. This is the channel: the customer opens the order in their account
+ * and attaches the file to the line it belongs to.
+ *
+ * The one deliberate hole in the rule that an order freezes everything, so it
+ * is fenced on three sides — the order has to be theirs, it has to still be
+ * open (domain/order/artworkWindow), and the product has to accept drawings at
+ * all. Every refusal is a 404 rather than a 403: whether somebody else's order
+ * exists is not the caller's business.
+ *
+ * Replaces the set rather than adding to it, the same as the cart does. A
+ * customer who attached the wrong file needs a way to correct it, and an
+ * add-only endpoint makes that a second endpoint nobody builds. What stops
+ * that quietly rewriting history is the note below: the order's thread records
+ * that files arrived, who sent them and when, so the change is visible to the
+ * staff member reading it rather than inferred from a timestamp.
+ */
+const attachArtwork = async (
+	userId: string,
+	orderId: string,
+	itemId: string,
+	assetIds: string[],
+	locale: LocaleCode
+) => {
+	const item = await prisma.orderItem.findFirst({
+		where: { id: itemId, orderId, order: { userId } },
+		include: {
+			// What the line holds now, so the note can say what actually changed
+			// rather than only what it ended up with.
+			files: { orderBy: { sortOrder: "asc" } },
+			order: { select: { id: true, number: true, status: true, locale: true } },
+			variant: {
+				select: { product: { select: { artworkMaxFiles: true, artworkRequired: true } } },
+			},
+		},
+	})
+
+	if (!item) {
+		throw new ApiError(httpStatus.NOT_FOUND, "That line is not on your order", {
+			messageKey: "order.lineNotFound",
+		})
+	}
+
+	if (!acceptsLateArtwork(item.order.status)) {
+		throw new ApiError(httpStatus.CONFLICT, "This order is no longer open for files", {
+			messageKey: "order.artworkClosed",
+		})
+	}
+
+	// The product's own limit, refused here rather than only in the form — the
+	// form is not what protects production from a line with forty attachments.
+	ArtworkService.refuse(checkArtwork(readArtworkRules(item.variant?.product), assetIds.length))
+
+	const assets = await ArtworkService.assertOwned(assetIds, userId)
+
+	await prisma.$transaction([
+		prisma.orderItemFile.deleteMany({ where: { orderItemId: itemId } }),
+		prisma.orderItemFile.createMany({
+			data: assets.map((asset, index) => ({
+				orderItemId: itemId,
+				assetId: asset.id,
+				// Copied, not read through the asset: a file the customer later
+				// deletes still shows on the order as something that was supplied.
+				fileName: asset.originalName,
+				sortOrder: index,
+			})),
+		}),
+	])
+
+	const customer = await prisma.user.findUnique({ where: { id: userId } })
+	const customerName =
+		[customer?.firstName, customer?.lastName].filter(Boolean).join(" ") ||
+		customer?.email ||
+		"The customer"
+
+	const orderNumber = formatNumber(item.order.number)
+
+	/*
+	 * Recorded on the order before anybody is told about it.
+	 *
+	 * This is what keeps a replaceable set honest against the rule that an order
+	 * freezes everything: the rows hold what the line carries *now*, and the
+	 * thread holds how it got there. A drawing swapped for a corrected one is
+	 * visible to the staff member reading the order rather than inferred from a
+	 * timestamp.
+	 *
+	 * Private — a note for staff, not a message to the customer, so it must not
+	 * be mailed back to them. `authorId` stays null because the author is not a
+	 * member of staff; the name is copied so the thread still says who.
+	 */
+	const names = assets.map((a) => a.originalName).join(", ")
+	const had = item.files.length
+
+	await prisma.orderNote.create({
+		data: {
+			orderId,
+			authorId: null,
+			authorName: customerName,
+			body: !assets.length
+				? `Removed the ${had} file(s) from “${item.name}”`
+				: had
+					? `Replaced the files on “${item.name}” (was: ${item.files.map((f) => f.fileName).join(", ")}) with: ${names}`
+					: `Attached ${assets.length} file(s) to “${item.name}”: ${names}`,
+			isCustomerVisible: false,
+		},
+	})
+
+	// Only when something actually arrived. Clearing a line is a correction, not
+	// news, and mailing it would train staff to ignore the ones that matter.
+	if (assets.length) {
+		await notifyStaffOfArtwork({
+			// The order's own language, not the request's — the shop reads these,
+			// and an order placed in German stays German.
+			locale: (item.order.locale || locale) as LocaleCode,
+			orderId: item.order.id,
+			orderNumber,
+			customerName,
+			lineName: item.name,
+			fileNames: assets.map((a) => a.originalName),
+		})
+	}
+
+	return assets.map(ArtworkService.toFile)
+}
+
 export const OrderService = {
 	preview,
 	place,
+	attachArtwork,
 	addNote,
 	listNotes,
 	listMine,

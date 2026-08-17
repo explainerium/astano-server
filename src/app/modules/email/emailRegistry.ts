@@ -167,6 +167,13 @@ export const EMAILS = {
 		canDisable: true,
 		recipientSetting: "mail.adminNotifyAddress",
 	},
+	"b2b-received": {
+		label: "Dealer application received",
+		description:
+			"To the applicant as soon as a dealer application is submitted, so they know it arrived and what happens next. Approval and rejection have their own messages.",
+		audience: "customer",
+		canDisable: true,
+	},
 	"staff-b2b-application": {
 		label: "New dealer application",
 		description: "Tells staff a B2B application is waiting for a decision.",
@@ -180,6 +187,14 @@ export const EMAILS = {
 		audience: "staff",
 		canDisable: true,
 		recipientSetting: "stock.notifyAddress",
+	},
+	"staff-order-artwork": {
+		label: "Print files sent later",
+		description:
+			"Tells staff a customer has attached a drawing to an order they had already placed. Links to the order, not to the file.",
+		audience: "staff",
+		canDisable: true,
+		recipientSetting: "mail.adminNotifyAddress",
 	},
 } as const satisfies Record<string, EmailDefinition>
 

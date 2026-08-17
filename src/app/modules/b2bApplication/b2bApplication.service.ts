@@ -1,9 +1,11 @@
 import bcrypt from "bcrypt"
 import type { Prisma, UserStatus } from "@prisma/client"
 import type { LocaleCode } from "../../../config/locales"
-import { sendAccountDecision, notifyStaff } from "../../../helpers/mailer"
+import { validateVatNumber } from "../../../helpers/vies"
+import { sendAccountDecision, sendB2bReceived, notifyStaff } from "../../../helpers/mailer"
 import { t } from "../../../i18n"
 import { httpStatus } from "../../../shared/httpStatus"
+import { logger } from "../../../shared/logger"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
 import { BCRYPT_ROUNDS } from "../auth/auth.constant"
@@ -133,6 +135,52 @@ const apply = async (payload: any, locale: LocaleCode) => {
 			},
 			include,
 		})
+	})
+
+	/*
+	 * Check the VAT ID against VIES, once, here.
+	 *
+	 * It is the only moment worth spending the round trip on: a dealer supplies
+	 * the number when they apply, and `vatValidated` on their account is what
+	 * makes reverse charge apply at checkout. Without this the field was
+	 * recorded and never checked — the customer had to find the button in their
+	 * account and press it themselves, which nobody does, so every EU dealer was
+	 * quietly invoiced 19% VAT they should not have paid.
+	 *
+	 * Outside the transaction and unable to fail the registration. VIES is slow
+	 * and occasionally down, and an applicant must not be turned away because a
+	 * European web service is having a bad afternoon — an unchecked number
+	 * simply stays unvalidated, which charges full tax and is the safe
+	 * direction. Staff see the outcome on the application.
+	 */
+	if (payload.vatNumber?.trim()) {
+		try {
+			const result = await validateVatNumber(payload.vatNumber)
+
+			await prisma.user.update({
+				where: { id: created.userId },
+				data: {
+					vatValidated: result.valid,
+					vatValidatedAt: result.valid ? new Date() : null,
+				},
+			})
+		} catch (error) {
+			logger.warn({ err: error, applicationId: created.id }, "VAT check failed during registration")
+		}
+	}
+
+	/*
+	 * Told to the applicant before staff are told about them.
+	 *
+	 * Fire-and-forget against an application already written — `dispatch` hands
+	 * off to the transport without waiting, so a slow mail server cannot fail a
+	 * registration that has committed.
+	 */
+	await sendB2bReceived({
+		to: payload.email,
+		locale,
+		name: payload.firstName,
+		company: payload.companyName,
 	})
 
 	await notifyStaff({

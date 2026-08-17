@@ -90,6 +90,20 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
 
+      # Where the SHOP is — the origin a customer opens, which is NOT this API.
+      #
+      # Every link in every email comes from here: password resets, the welcome
+      # mail, quote links, and the dashboard link staff get when a print file
+      # arrives after an order. They used to be built from PUBLIC_BASE_URL, so a
+      # password reset arrived pointing at the API and answered 404 in JSON.
+      #
+      # Optional: left unset it falls back to the first entry in CORS_ORIGINS,
+      # which is correct here. Set it when several origins are allowed and the
+      # first is not the customer-facing one.
+      # e.g. https://astano.vercel.app
+      - key: SHOP_BASE_URL
+        sync: false
+
       # Render's filesystem is ephemeral: with the local driver every uploaded
       # product image disappears on the next deploy.
       #

@@ -23,7 +23,26 @@ export { isConfigured } from "./transport"
  * customer receives something the shop had switched off.
  */
 
-const url = (path: string): string => `${env.PUBLIC_BASE_URL}${path}`
+/**
+ * A link into the shop, not into this API.
+ *
+ * `PUBLIC_BASE_URL` is the API's own origin — right for media, wrong for
+ * anything a person is meant to open. Every link in every email used it, so a
+ * password reset arrived pointing at a URL that answers 404 in JSON and a
+ * customer had no way to finish resetting their password. `SHOP_BASE_URL`
+ * falls back to the first allowed CORS origin, so this needs no new variable
+ * to start working.
+ */
+const url = (path: string): string => `${env.SHOP_BASE_URL}${path}`
+
+/**
+ * A link into the dashboard.
+ *
+ * Separate from `url` only so the reason is written down: the admin lives
+ * outside `[locale]` and takes no language prefix, so a staff link must never
+ * be built through whatever localises the customer-facing ones.
+ */
+const adminUrl = (path: string): string => `${env.SHOP_BASE_URL}/admin${path}`
 
 interface DispatchInput {
 	/** Customer mail. Staff mail leaves this out and takes the configured address. */
@@ -423,6 +442,39 @@ export const sendAccountDecision = async (input: {
 }
 
 /**
+ * Confirms a dealer application to the person who sent it.
+ *
+ * Ordinary signup has said welcome since the day it was built; a dealer
+ * application said nothing at all. Somebody filled in sixteen fields, saw a
+ * thank-you page, and then heard nothing — with no way to tell whether it had
+ * arrived, and nothing in their inbox to reply to or forward to a colleague.
+ *
+ * Deliberately says the account is not yet approved. This is the one message
+ * where being clear about *not* being finished is the entire job: the account
+ * exists, they can sign in, and they are on guest prices until a human looks at
+ * it (R5b). Approval and rejection are separate messages.
+ */
+export const sendB2bReceived = async (input: {
+	to: string
+	locale: LocaleCode
+	name: string
+	company: string
+}): Promise<void> => {
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+
+	await dispatch("b2b-received", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.b2bReceived",
+		vars: { name: input.name, company: input.company },
+		intro: L("email.b2bReceived.intro", { name: input.name, company: input.company }),
+		bodyHtml: `<p style="margin:0;font-size:13px;opacity:0.7;">${esc(L("email.b2bReceived.next"))}</p>`,
+		action: { label: L("email.b2bReceived.action"), url: url("/account") },
+		textLines: [L("email.b2bReceived.next"), "", url("/account")],
+	})
+}
+
+/**
  * Tells staff something has landed.
  *
  * The caller passes the kind rather than a recipient: which address it goes to
@@ -432,12 +484,27 @@ export const sendAccountDecision = async (input: {
 export const notifyStaff = async (input: {
 	kind: Extract<
 		EmailKind,
-		"staff-new-order" | "staff-new-quote" | "staff-new-contact" | "staff-b2b-application" | "staff-low-stock"
+		| "staff-new-order"
+		| "staff-new-quote"
+		| "staff-new-contact"
+		| "staff-b2b-application"
+		| "staff-low-stock"
+		| "staff-order-artwork"
 	>
 	locale: LocaleCode
 	subject: string
 	title: string
 	intro: string
+	/**
+	 * A button through to the thing that happened.
+	 *
+	 * Always a dashboard link, never the file itself. A signed download URL
+	 * lives five minutes and would be dead before anybody opened the message —
+	 * and lengthening it would put a customer's drawing behind a URL that
+	 * survives every forward of the email it arrived in. Staff sign in and take
+	 * it from the order, where the download already lives.
+	 */
+	action?: { label: string; url: string }
 	/**
 	 * Forces the recipient. Only previews and test sends pass this — real
 	 * notifications take the address from the settings, so that a shop which
@@ -463,9 +530,52 @@ export const notifyStaff = async (input: {
 				company,
 				branding: prepared.branding,
 				additionalContent: prepared.additionalContent,
+				...(input.action ? { action: input.action } : {}),
 			}),
-			text: toPlainText(prepared.heading ?? input.title, input.intro, []),
+			text: toPlainText(
+				prepared.heading ?? input.title,
+				input.intro,
+				input.action ? ["", input.action.url] : []
+			),
 		},
 		{ kind: input.kind }
 	)
+}
+
+/**
+ * Tells staff a customer has attached a drawing to an order already placed.
+ *
+ * The link goes to the order in the dashboard rather than to the file, so the
+ * message can be read an hour later and forwarded without handing the artwork
+ * to whoever it reaches. The download sits on that screen already.
+ */
+export const notifyStaffOfArtwork = async (input: {
+	locale: LocaleCode
+	orderId: string
+	orderNumber: string
+	customerName: string
+	fileNames: string[]
+	lineName: string
+	/** Previews and test sends only — see notifyStaff. */
+	to?: string
+}): Promise<void> => {
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+
+	await notifyStaff({
+		kind: "staff-order-artwork",
+		locale: input.locale,
+		subject: L("staff.orderArtwork.subject", { number: input.orderNumber }),
+		title: L("staff.orderArtwork.title", { number: input.orderNumber }),
+		intro: L("staff.orderArtwork.intro", {
+			name: input.customerName,
+			number: input.orderNumber,
+			line: input.lineName,
+			files: input.fileNames.join(", "),
+		}),
+		action: {
+			label: L("staff.orderArtwork.action"),
+			url: adminUrl(`/dashboard/orders/${input.orderId}`),
+		},
+		...(input.to ? { to: input.to } : {}),
+	})
 }

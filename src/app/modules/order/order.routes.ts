@@ -40,6 +40,24 @@ OrderRoutes.get("/:id", validateRequest(OrderValidation.idSchema), OrderControll
 /** A customer downloads their own invoice; staff download any. */
 OrderRoutes.get("/:id/invoice.pdf", validateRequest(OrderValidation.idSchema), InvoiceController.stream)
 
+/**
+ * Print files sent after the order was placed.
+ *
+ * `authAccount`, deliberately. Sending the drawing for something already bought
+ * completes an obligation rather than creating one, so a suspended customer
+ * keeps it — the same reasoning that lets them reach their invoices. `auth`
+ * would leave a suspended customer with an order nobody can make.
+ *
+ * Rate limited: it writes rows and sends a staff mail, and neither should be
+ * available on a loop.
+ */
+OrderRoutes.put(
+	"/:id/items/:itemId/files",
+	writeLimiter,
+	validateRequest(OrderValidation.setItemFilesSchema),
+	OrderController.attachArtwork
+)
+
 /** Staff order management. */
 export const AdminOrderRoutes = Router()
 
