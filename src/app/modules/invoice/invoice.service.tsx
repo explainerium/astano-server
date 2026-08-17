@@ -1,11 +1,46 @@
-import {
-	Document,
-	Page,
-	StyleSheet,
-	Text,
-	View,
-	renderToBuffer,
-} from "@react-pdf/renderer"
+/**
+ * Type-only, so nothing is required at load time.
+ *
+ * `@react-pdf/renderer` is ESM and this project is CommonJS. A normal import
+ * compiles to `require()`, and requiring an ESM module only works on Node 22.12
+ * and above — it throws `ERR_REQUIRE_ESM` on anything older. That is fine on a
+ * machine whose Node version you chose and fatal on one you did not: the whole
+ * app is a single module graph, so the failure is not "invoices are broken", it
+ * is every request to the API dying at import with `FUNCTION_INVOCATION_FAILED`
+ * and nothing to read.
+ *
+ * `import()` works on every version, so the platform's Node no longer matters.
+ * The file this replaced said the same thing about Puppeteer, in the same
+ * words, and switching libraries is not a reason the rule stopped applying.
+ */
+type Renderer = typeof import("@react-pdf/renderer")
+
+/**
+ * The primitives the layout below is written in, filled in by `loadRenderer`.
+ *
+ * Module-level bindings rather than a parameter threaded through every
+ * component, because JSX resolves `<View>` by looking up an identifier in
+ * lexical scope — there is no way to hand it in. The invariant that makes this
+ * safe is small and stated in one place: `generate` is the only entry point,
+ * and it awaits the load before any element is constructed.
+ */
+let Document!: Renderer["Document"]
+let Page!: Renderer["Page"]
+let View!: Renderer["View"]
+let Text!: Renderer["Text"]
+
+let renderer: Promise<Renderer> | null = null
+
+/** Loaded once per process and reused — the import itself is not free. */
+const loadRenderer = async (): Promise<Renderer> => {
+	renderer ??= import("@react-pdf/renderer")
+
+	const loaded = await renderer
+	;({ Document, Page, View, Text } = loaded)
+
+	return loaded
+}
+
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { nestOptionLines } from "../../../domain/order/nestOptionLines"
 import { t } from "../../../i18n"
@@ -36,7 +71,16 @@ import { SettingService, type CompanyDetails } from "../setting/setting.service"
 
 /** Everything is Helvetica, which is built into every PDF reader — no font
  *  file to ship, and it covers the Latin-1 range German invoices need. */
-const styles = StyleSheet.create({
+/** react-pdf's own style type, reached through the import type so nothing
+ *  is required at load time. */
+type Style = NonNullable<Parameters<Renderer["StyleSheet"]["create"]>[0]>[string]
+
+/*
+ * A plain object, not `StyleSheet.create`. That helper is identity — it exists
+ * for parity with React Native — and calling it here would mean requiring the
+ * module at load time, which is the very thing this file no longer does.
+ */
+const styles = {
 	page: {
 		fontFamily: "Helvetica",
 		fontSize: 9,
@@ -128,7 +172,7 @@ const styles = StyleSheet.create({
 		color: "#777777",
 		lineHeight: 1.7,
 	},
-})
+} satisfies Record<string, Style>
 
 const money = (v: string, currency: string): string => `${v} ${currency}`
 
@@ -463,6 +507,10 @@ const generate = async (orderId: string): Promise<{ pdf: Buffer; filename: strin
 	const order = await loadOrder(orderId)
 	const company = await SettingService.getCompany()
 	const locale = (order.locale || DEFAULT_LOCALE) as LocaleCode
+
+	// Before anything below constructs an element — see the bindings at the top
+	// of this file. This is the invariant the whole lazy-load rests on.
+	const { renderToBuffer } = await loadRenderer()
 
 	try {
 		const pdf = await renderToBuffer(

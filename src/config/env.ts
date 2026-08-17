@@ -216,27 +216,36 @@ const parsed = envSchema
 	.safeParse(process.env)
 
 if (!parsed.success) {
+	const problems = parsed.error.issues.map(
+		(issue) => `${issue.path.join(".")}: ${issue.message}`
+	)
+
 	/*
-	 * Fail loudly and readably — this is the first thing a new developer sees,
-	 * and on a serverless host it is the *only* thing anybody sees.
-	 *
-	 * There, `process.exit(1)` below surfaces as a bare
-	 * `FUNCTION_INVOCATION_FAILED` with a 500 page and no reason on it. These
-	 * lines are in the runtime log and nowhere else, so they have to name both
-	 * the variable and where it is actually set — telling somebody to edit
-	 * `.env` is useless advice on a platform that has no `.env`.
+	 * Printed readably first — this is the first thing a new developer sees.
 	 */
 	console.error("\n  Invalid environment configuration:\n")
-	for (const issue of parsed.error.issues) {
-		console.error(`   - ${issue.path.join(".")}: ${issue.message}`)
-	}
+	for (const problem of problems) console.error(`   - ${problem}`)
 	console.error(
 		"\n  Locally: copy .env.example to .env and fill it in." +
 			"\n  On a host (Vercel/Render): set these in the project's environment" +
 			"\n  variables, then redeploy — changing them does not restart a" +
 			"\n  deployment on its own.\n"
 	)
-	process.exit(1)
+
+	/*
+	 * Thrown, not `process.exit(1)`.
+	 *
+	 * Both stop a half-configured process, and on a long-running server the
+	 * outcome is identical: an uncaught error at import ends it with a non-zero
+	 * code, after the lines above have already been printed.
+	 *
+	 * The difference is on a serverless host, where the entry point wraps this
+	 * import in a `try` so it can answer requests with the reason instead of a
+	 * bare `FUNCTION_INVOCATION_FAILED`. `process.exit` cannot be caught — it
+	 * takes the invocation down and leaves the platform with nothing to say,
+	 * which is exactly the diagnosis-by-guesswork this avoids. See api/index.js.
+	 */
+	throw new Error(`Invalid environment configuration — ${problems.join("; ")}`)
 }
 
 export const env = parsed.data

@@ -28,4 +28,49 @@
  * Express itself needs no adapting: an Express app *is* a `(req, res)` handler,
  * which is exactly what Vercel's Node runtime expects.
  */
-module.exports = require("../dist/app").default
+/**
+ * Loaded inside a try, so a failure at import says what it was.
+ *
+ * A module that throws while a serverless function is starting takes the whole
+ * invocation with it, and the platform can only report
+ * `FUNCTION_INVOCATION_FAILED` — a 500 page with an id on it and nothing else.
+ * The real reason goes to the runtime log, which is a different screen from the
+ * build log everybody looks at first, and that gap has cost several deploys.
+ *
+ * So the failure is caught and answered with. `503`, because the deployment is
+ * not serving rather than the request being wrong, and `Retry-After` so a
+ * crawler does not treat it as permanent.
+ */
+let app
+
+try {
+	app = require("../dist/app").default
+} catch (error) {
+	/*
+	 * The message, not the stack.
+	 *
+	 * What breaks here is a missing environment variable or a module that will
+	 * not load, and the message names it — "Cannot find module 'x'",
+	 * "ERR_REQUIRE_ESM". A stack would add file paths from inside the bundle and
+	 * tell a stranger more about the deployment than it tells the person fixing
+	 * it. The stack is logged; only the sentence is served.
+	 */
+	console.error("The API failed to start:", error)
+
+	app = (_req, res) => {
+		res.statusCode = 503
+		res.setHeader("Content-Type", "application/json; charset=utf-8")
+		res.setHeader("Retry-After", "120")
+		res.end(
+			JSON.stringify({
+				success: false,
+				statusCode: 503,
+				message: "The API could not start.",
+				error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+				hint: "Check the deployment's environment variables, then redeploy — the full stack is in the runtime log.",
+			})
+		)
+	}
+}
+
+module.exports = app
