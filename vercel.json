@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npx prisma generate && npm run build:bundle && rm -rf node_modules/typescript dist node_modules/sanitize-html node_modules/htmlparser2",
+  "buildCommand": "npx prisma generate && npm run build:bundle && rm -rf node_modules/typescript",
   "installCommand": "npm ci --include=dev",
   "regions": [
     "fra1"

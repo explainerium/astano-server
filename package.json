@@ -19,6 +19,21 @@
   },
   "license": "UNLICENSED",
   "type": "commonjs",
+  "//overrides": [
+    "htmlparser2 is pinned to the last version that still ships a CommonJS",
+    "build. sanitize-html is CommonJS and does require('htmlparser2'); v11",
+    "dropped the CJS entry, so on any runtime that cannot require() an ES",
+    "module that call throws ERR_REQUIRE_ESM and takes the whole app down at",
+    "load. Node 22.12+ can require(esm), which is why this never appeared in",
+    "development or on Render — but Vercel's loader cannot, and every request",
+    "there returned 500 until this pin.",
+    "",
+    "v10 is `type: module` with `main: ./dist/commonjs/index.js`: both formats,",
+    "same parser. Remove the pin once sanitize-html no longer require()s it."
+  ],
+  "overrides": {
+    "htmlparser2": "10.0.0"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1097.0",
     "@aws-sdk/s3-request-presigner": "^3.1097.0",
@@ -68,7 +83,14 @@
     "vitest": "^4.1.10"
   },
   "private": true,
+  "//engines": [
+    "22, not 24, because a host that cannot offer 24 does not fail loudly — it",
+    "picks a version of its own and builds anyway, and the mismatch only shows",
+    "up at runtime. Nothing here needs 24: the deployed bundle is emitted for",
+    "node20, and 22 is where require(esm) and the test runner's flags land.",
+    "Render and the VPS run 24 regardless; this is a floor, not a target."
+  ],
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   }
 }

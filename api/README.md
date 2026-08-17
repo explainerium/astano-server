@@ -13,32 +13,44 @@ The decisions behind `../vercel.json`, which has nowhere to put a comment:
 | `buildCommand` → `npx prisma generate` | The generated client is not committed and Vercel builds from a clean cache. `npx`, not a bare `prisma`: a build command runs in a plain shell, which does not have `node_modules/.bin` on its PATH the way an npm script does — a bare `prisma` exits 127, "command not found". |
 | `buildCommand` → `npm run build` | We compile, Vercel does not. See below. |
 | `buildCommand` → `rm -rf node_modules/typescript` | **This is not a hack, it is a workaround for a bug in Vercel's own builder.** See below. |
-| `buildCommand` → `rm -rf dist node_modules/sanitize-html node_modules/htmlparser2` | Deletes everything the bundle replaced, so nothing can quietly load it. See below. |
 | `installCommand: npm ci --include=dev` | Vercel sets `NODE_ENV=production` for the build, and npm then skips devDependencies — where `prisma` and `typescript` both live. Without this the build fails looking for a Prisma CLI that was never installed. `render.yaml` carries the same flag for the same reason. |
 | **No `prisma migrate deploy`**  | Every preview deployment would otherwise migrate the production database. Migrations are run deliberately: `npx prisma migrate deploy` from a machine that means it.                           |
 | `crons`                         | `node-cron` needs a process that stays alive and Vercel has none, so the schedule lives with the platform and calls `GET /api/v1/cron/run`.                                                    |
 
-## Why the unbundled build is deleted after bundling
+## `require()` of an ES module, and why it only broke here
 
-`dist/` and the two packages the bundle inlined (`sanitize-html`, and the
-ESM-only `htmlparser2` it requires) are removed once `dist-bundle/app.js`
-exists.
+This cost a day, so it is written down properly.
 
-Not tidiness. `ERR_REQUIRE_ESM` from `node_modules/sanitize-html/index.js`
-survived several deployments *after* the bundle was in place — and it cannot
-come from the bundle, where that `require` no longer exists. Something was still
-reaching the unbundled code. Rather than keep guessing which layer (a restored
-build cache, a stale bytecode snapshot, a second traced entry point), the
-unbundled code is simply not there any more.
+Every request returned 500 with `ERR_REQUIRE_ESM`: `sanitize-html/index.js`
+calling `require("htmlparser2")`, where htmlparser2 v11 and later are ESM-only.
+The same code had never once failed in development or on Render.
 
-That also makes the failure legible if it ever happens again: a load of the old
-path now fails with `MODULE_NOT_FOUND`, which `api/index.js` catches and serves
-as a 503 naming the module — instead of an ESM error that reads like the bundle
-did not work.
+The difference is not the code, it is the loader. **Node 22.12 and later can
+`require()` an ES module; Vercel's loader cannot** — it is a Rust
+reimplementation (`/opt/rust/nodejs.js`, `/opt/rust/bytecode.js` in a stack
+trace), and it throws where stock Node would have succeeded. Development runs
+Node 24 and Render runs Node 24, so both sides of that line looked identical
+until the first deploy here.
 
-Both are safe to delete. The bundle inlines `sanitize-html` outright, and
-nothing external references it — verified with
-`grep -c 'require("sanitize-html")' dist-bundle/app.js`, which is zero.
+The fix is the `overrides` block in `package.json`, pinning htmlparser2 to
+`10.0.0` — the last release that still ships a CommonJS build. Not the bundler,
+which was the first attempt: bundling only hid the `require` from *one* of the
+two code paths the platform might run, and left the other still broken.
+
+Reproduce either state locally, with the flag that turns stock Node into this
+loader:
+
+```sh
+node --no-experimental-require-module -e 'require("sanitize-html")'
+# without the override: ERR_REQUIRE_ESM, exactly as deployed
+# with it:              loads
+```
+
+That flag is the check to run before adding any dependency here. The one other
+ESM-only package in the tree, `color-string` (under `@react-pdf/renderer`), is
+safe only because the invoice renderer is reached through a dynamic `import()`,
+which is allowed to load ESM. A static `require` of either would fail the same
+way.
 
 ## Why TypeScript is deleted after the build
 
