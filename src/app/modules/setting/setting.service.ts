@@ -1,5 +1,8 @@
 import { Prisma } from "@prisma/client"
+import { planSettingWrite } from "../../../domain/setting/settingWrite"
+import { logger } from "../../../shared/logger"
 import { prisma } from "../../../shared/prisma"
+import { maskSecret, open, seal } from "../../../shared/secretBox"
 import { PUBLIC_KEYS, SETTINGS, SETTING_GROUPS, SETTING_SECTIONS } from "./settingRegistry"
 
 /**
@@ -34,18 +37,100 @@ export interface CompanyDetails {
 const asString = (value: unknown): string =>
 	value === null || value === undefined ? "" : String(value)
 
+/**
+ * Settings whose value is a credential: encrypted at rest, and never returned.
+ *
+ * Taken from the registry rather than listed here, so declaring a setting as a
+ * password is the whole of what makes it secret. A second list is a list that
+ * eventually disagrees with the first, and the failure mode is a password on
+ * the wire.
+ */
+const SECRET_KEYS = new Set(
+	Object.entries(SETTINGS)
+		.filter(([, definition]) => definition.type === "password")
+		.map(([key]) => key)
+)
+
+export const isSecretKey = (key: string): boolean => SECRET_KEYS.has(key)
+
+/**
+ * What the admin screen may see of a stored credential: that there is one, and
+ * enough of it to recognise which. Never the value.
+ *
+ * A secret that cannot be decrypted — a rotated `CREDENTIALS_KEY`, most likely
+ * — reads as set with no preview rather than as absent. Absent would invite the
+ * admin to leave the field alone, and leaving it alone is the one thing that
+ * cannot fix it.
+ */
+const describeSecret = (stored: unknown): { isSet: boolean; preview: string | null } => {
+	const sealed = asString(stored)
+	if (!sealed) return { isSet: false, preview: null }
+
+	try {
+		return { isSet: true, preview: maskSecret(open(sealed)) }
+	} catch {
+		return { isSet: true, preview: null }
+	}
+}
+
 const getAll = async (opts: { publicOnly?: boolean } = {}) => {
 	const rows = await prisma.setting.findMany({
 		where: opts.publicOnly ? { isPublic: true } : {},
 		orderBy: { key: "asc" },
 	})
 
-	return rows.map((r) => ({ key: r.key, value: r.value, isPublic: r.isPublic, updatedAt: r.updatedAt }))
+	return rows.map((r) =>
+		SECRET_KEYS.has(r.key)
+			? {
+					key: r.key,
+					// Not the ciphertext either. It is not readable without the key,
+					// but there is no reason for it to leave the server at all.
+					value: "",
+					isPublic: r.isPublic,
+					updatedAt: r.updatedAt,
+					...describeSecret(r.value),
+				}
+			: { key: r.key, value: r.value, isPublic: r.isPublic, updatedAt: r.updatedAt }
+	)
 }
 
+/**
+ * Decrypts a stored credential for the server's own use.
+ *
+ * Returns "" when unset or unreadable, and says so in the log. The callers are
+ * mail and payment configuration, where a blank credential produces a clear
+ * authentication failure the admin can act on; throwing here would instead take
+ * down whatever request happened to be passing.
+ */
+const readSecret = async (key: string): Promise<string> => {
+	const row = await prisma.setting.findUnique({ where: { key } })
+	const sealed = asString(row?.value)
+
+	if (!sealed) return ""
+
+	try {
+		return open(sealed)
+	} catch (error) {
+		logger.error(
+			{ err: error, key },
+			"a stored credential could not be decrypted — CREDENTIALS_KEY may have changed since it was saved"
+		)
+		return ""
+	}
+}
+
+/**
+ * Every setting as one object, credentials excluded.
+ *
+ * Excluded structurally rather than by asking each of the sixteen callers to
+ * remember. This map is spread into email contexts and passed around as "the
+ * settings"; one of those paths reaching a response is a question of when, not
+ * whether. Anything that genuinely needs a credential asks for it by name
+ * through `readSecret`, which is a decision the caller has to make on purpose.
+ */
 const getMap = async (): Promise<Record<string, unknown>> => {
 	const rows = await prisma.setting.findMany()
-	return Object.fromEntries(rows.map((r) => [r.key, r.value]))
+	return Object.fromEntries(rows.filter((r) => !SECRET_KEYS.has(r.key)).map((r) => [r.key, r.value]))
 }
 
 /** Company block for invoices and email footers, blanks where unset. */
@@ -85,8 +170,16 @@ const getCompany = async (): Promise<CompanyDetails> => {
  * without needing a transaction at all.
  */
 const setMany = async (entries: { key: string; value: unknown; isPublic?: boolean }[]) => {
-	if (entries.length) {
-		const rows = entries.map(
+	// Credentials are sealed on the way in, and a blank one is left alone rather
+	// than written. The rule, and why, is in domain/setting/settingWrite.
+	const prepared = planSettingWrite(entries, isSecretKey).map((write) =>
+		write.kind === "secret"
+			? { key: write.key, value: seal(write.value), isPublic: false }
+			: { key: write.key, value: write.value, isPublic: write.isPublic }
+	)
+
+	if (prepared.length) {
+		const rows = prepared.map(
 			(e) =>
 				Prisma.sql`(${e.key}, ${JSON.stringify(e.value ?? null)}::jsonb, ${e.isPublic ?? false}, now())`
 		)
@@ -134,6 +227,8 @@ export const SettingService = {
 	getCompany,
 	getPublic,
 	read,
+	readSecret,
+	isSecretKey,
 	setMany,
 	remove,
 	SETTINGS,

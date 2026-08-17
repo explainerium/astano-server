@@ -159,7 +159,7 @@ const preview = async (kind: EmailKind, locale: LocaleCode) => {
  * which a switched-off template cannot answer by refusing to send.
  */
 const sendTest = async (kind: EmailKind, locale: LocaleCode, to: string) => {
-	if (!isConfigured()) {
+	if (!(await isConfigured())) {
 		throw new ApiError(httpStatus.CONFLICT, "No SMTP server is configured", {
 			messageKey: "email.smtpMissing",
 		})

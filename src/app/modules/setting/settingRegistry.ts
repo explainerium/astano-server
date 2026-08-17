@@ -26,6 +26,16 @@ export type SettingType =
 	| "countries"
 	/** Hex only. Validated again on read — these land inside style attributes. */
 	| "color"
+	/**
+	 * Stored encrypted, and never sent back.
+	 *
+	 * The read path returns a mask instead of the value, and an empty box on
+	 * save means "I did not touch this" rather than "clear it" — the same two
+	 * rules the payment gateway credentials follow, for the same reason: the
+	 * screen cannot show what is stored, so it must not be able to destroy it by
+	 * accident either.
+	 */
+	| "password"
 
 export interface SettingDefinition {
 	/**
@@ -134,6 +144,12 @@ export const SETTING_GROUPS: {
 	},
 
 	// ── Email ──────────────────────────────────────────────────────────────
+	{
+		key: "smtp",
+		title: "Mail server",
+		blurb: "The account the shop sends through. Nothing is emailed until this is filled in.",
+		section: "email",
+	},
 	{
 		key: "mail",
 		title: "Sending",
@@ -266,9 +282,64 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 	},
 	"invoice.numberPrefix": { label: "Invoice number prefix", type: "text", fallback: "AST-", group: "invoice" },
 
+	// ── Mail server ────────────────────────────────────────────────────────
+	/*
+	 * SMTP as a setting rather than an environment variable.
+	 *
+	 * It began in the environment, which meant the shop could not send email
+	 * until somebody with access to the hosting dashboard redeployed it — and a
+	 * provider that starts rejecting mail on a Friday is not a deployment
+	 * problem, it is an outage. The client owns the mail account; they should be
+	 * able to repoint it.
+	 *
+	 * The environment is still read, as the fallback. A value here wins, so an
+	 * existing deployment keeps working until somebody fills this in, and a
+	 * blank host falls back rather than turning email off.
+	 */
+	"smtp.host": {
+		label: "SMTP server",
+		help: "From your email provider. Brevo is smtp-relay.brevo.com; your own web host will have its own. Leave empty to use the server's configured value.",
+		type: "text",
+		fallback: "",
+		group: "smtp",
+	},
+	"smtp.port": {
+		label: "Port",
+		help: "587 for almost everything. Use 465 only if your provider asks for it.",
+		type: "number",
+		fallback: 587,
+		group: "smtp",
+	},
+	"smtp.user": {
+		label: "Username",
+		help: "Usually the full email address, or the login your provider shows on its SMTP page.",
+		type: "text",
+		fallback: "",
+		group: "smtp",
+	},
+	"smtp.password": {
+		label: "Password",
+		/*
+		 * The distinction is worth spelling out on the screen. Providers that
+		 * issue a separate SMTP key — Brevo, Mailjet, SendGrid — reject the
+		 * account password with the same "authentication failed" as a typo, and
+		 * that costs an afternoon to work out from the error alone.
+		 */
+		help: "The SMTP key, which for most providers is not your account password. Stored encrypted; it is never shown again. Leave empty to keep the current one.",
+		type: "password",
+		fallback: "",
+		group: "smtp",
+	},
+
 	// ── Email ──────────────────────────────────────────────────────────────
 	"mail.fromName": { label: "Display name on outgoing email", type: "text", fallback: "", group: "mail" },
-	"mail.fromAddress": { label: "From address on outgoing email", type: "text", fallback: "", group: "mail" },
+	"mail.fromAddress": {
+		label: "From address on outgoing email",
+		help: "Must be an address on a domain your provider is allowed to send for, or mail will land in spam.",
+		type: "text",
+		fallback: "",
+		group: "mail",
+	},
 	// ── Email appearance ───────────────────────────────────────────────────
 	"email.headerImage": {
 		label: "Header logo URL",

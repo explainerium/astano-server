@@ -32,10 +32,40 @@ const app: Application = express()
  */
 app.set("trust proxy", 1)
 
+const ALLOWED_ORIGINS = env.CORS_ORIGINS.split(",")
+	.map((origin) => origin.trim())
+	.filter(Boolean)
+
+/** http://localhost:3001, http://127.0.0.1:5173 — any port, nothing else. */
+const LOCALHOST = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/
+
+/**
+ * The configured list, plus any localhost port while developing.
+ *
+ * Not laxness — the list is exactly as strict in production, where the only
+ * origins are the ones deployed. It is that a dev server does not reliably keep
+ * its port: leave yesterday's `next dev` running and today's picks 3001, and
+ * every request then fails a preflight the browser reports as
+ * `TypeError: Failed to fetch`. That surfaces as "the server is unreachable" on
+ * a server answering /health in five milliseconds, and the half hour it costs
+ * is spent looking at the backend, which is the one thing that is fine.
+ *
+ * A rejection here returns no `Access-Control-Allow-Origin` rather than an
+ * error, which is what the middleware did before and what the browser expects.
+ */
 app.use(helmet())
 app.use(
 	cors({
-		origin: env.CORS_ORIGINS.split(",").map((o) => o.trim()),
+		origin:
+			env.NODE_ENV === "production"
+				? ALLOWED_ORIGINS
+				: (origin, callback) =>
+						callback(
+							null,
+							// No Origin header at all: curl, a health check, a
+							// same-origin request. Never a cross-site browser call.
+							!origin || ALLOWED_ORIGINS.includes(origin) || LOCALHOST.test(origin)
+						),
 		credentials: true,
 	})
 )

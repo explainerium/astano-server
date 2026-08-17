@@ -4,6 +4,7 @@ import { httpStatus } from "../../../shared/httpStatus"
 import { sendResponse } from "../../../shared/sendResponse"
 import { t } from "../../../i18n"
 import { SettingService } from "./setting.service"
+import { sendTestMail } from "./settingMailTest"
 
 /** Everything, staff only. */
 const list: RequestHandler = catchAsync(async (req, res) => {
@@ -50,4 +51,24 @@ const remove: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, { statusCode: httpStatus.OK, message: t("setting.deleted", req.locale) })
 })
 
-export const SettingController = { list, listPublic, upsert, remove }
+/**
+ * Sends one real message through the configured server and reports what
+ * happened.
+ *
+ * Answers with 200 either way, the outcome in the body. A failed delivery is
+ * not a failed request — the admin asked whether the mail server works and got
+ * a truthful answer, which is the endpoint doing its job. Returning 500 would
+ * also hand the screen a generic error page in place of "535 authentication
+ * failed", which is the one thing worth reading.
+ */
+const testMail: RequestHandler = catchAsync(async (req, res) => {
+	const result = await sendTestMail(req.body.to as string, req.locale)
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t(result.ok ? "setting.mailTestSent" : "setting.mailTestFailed", req.locale),
+		data: result,
+	})
+})
+
+export const SettingController = { list, listPublic, upsert, remove, testMail }
