@@ -1,14 +1,26 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npx prisma generate && npm run build && rm -rf node_modules/typescript",
+  "buildCommand": "npx prisma generate && npm run build:bundle && rm -rf node_modules/typescript",
   "installCommand": "npm ci --include=dev",
-  "regions": ["fra1"],
+  "regions": [
+    "fra1"
+  ],
   "functions": {
     "api/index.js": {
-      "includeFiles": "dist/**",
+      "includeFiles": "dist-bundle/**",
       "maxDuration": 60
     }
   },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
-  "crons": [{ "path": "/api/v1/cron/run", "schedule": "30 3 * * *" }]
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/v1/cron/run",
+      "schedule": "30 3 * * *"
+    }
+  ]
 }

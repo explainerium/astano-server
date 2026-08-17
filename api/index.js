@@ -44,7 +44,22 @@
 let app
 
 try {
-	app = require("../dist/app").default
+	const loaded = require("../dist-bundle/app.js")
+	app = loaded?.default ?? loaded
+
+	/*
+	 * Checked, because the failure is otherwise silent and indistinguishable
+	 * from a crash. Exporting a non-function leaves the platform calling
+	 * `undefined(req, res)` inside its own launcher, which it can only report as
+	 * `FUNCTION_INVOCATION_FAILED` — the same page a thrown error gives, with
+	 * none of the same causes.
+	 */
+	if (typeof app !== "function") {
+		throw new TypeError(
+			`the bundle exported ${app === undefined ? "nothing" : typeof app}, not an Express app. ` +
+				`Keys: ${loaded ? Object.keys(loaded).join(", ") || "(none)" : "(module is empty)"}`
+		)
+	}
 } catch (error) {
 	/*
 	 * The message, not the stack.

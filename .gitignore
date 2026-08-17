@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Serverless bundle — built at deploy time, never committed.
+dist-bundle/
 coverage/
 
 # env — every variant is private. Only the template is committed, so the

@@ -9,16 +9,25 @@
  * Message files are loaded eagerly at boot: they are small, and a missing file
  * should fail immediately rather than on the first German request.
  */
-import { DEFAULT_LOCALE, type LocaleCode, SUPPORTED_LOCALES } from "../config/locales"
+import { DEFAULT_LOCALE, type LocaleCode } from "../config/locales"
+import de from "./messages/de.json"
+import en from "./messages/en.json"
 
 type Catalog = Record<string, string>
 
-const catalogs: Record<string, Catalog> = {}
-
-for (const code of SUPPORTED_LOCALES) {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	catalogs[code] = require(`./messages/${code}.json`) as Catalog
-}
+/**
+ * Named imports, not `require(\`./messages/${code}.json\`)` in a loop.
+ *
+ * A template literal inside `require` is invisible to every tool that reads the
+ * module graph without running it. A bundler cannot inline what it cannot name,
+ * and a file tracer cannot ship it — so the catalogues either vanished from the
+ * deployment or had to be forced in by hand with an `includeFiles` glob.
+ *
+ * Listing them costs one line per language and makes the dependency real. The
+ * set of locales is compiled in anyway (`config/locales.ts`), so a new language
+ * was never only a data change.
+ */
+const catalogs: Record<string, Catalog> = { de, en }
 
 /**
  * Translate a key. Falls back to the default locale, then to the key itself —
@@ -57,7 +66,10 @@ export const missingTranslations = (): Record<string, string[]> => {
 	const base = Object.keys(catalogs[DEFAULT_LOCALE] ?? {})
 	const gaps: Record<string, string[]> = {}
 
-	for (const code of SUPPORTED_LOCALES) {
+	// The catalogues themselves, not the configured locale list — this reports
+	// gaps between what is loaded, and a locale with no catalogue at all would
+	// otherwise be reported as missing every key it never had.
+	for (const code of Object.keys(catalogs)) {
 		if (code === DEFAULT_LOCALE) continue
 		const missing = base.filter((key) => !(key in (catalogs[code] ?? {})))
 		if (missing.length) gaps[code] = missing
