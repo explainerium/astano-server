@@ -1,10 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npx prisma generate",
+  "buildCommand": "npx prisma generate && npm run build",
   "installCommand": "npm ci --include=dev",
   "regions": ["fra1"],
   "functions": {
-    "api/index.ts": {
+    "api/index.js": {
+      "includeFiles": "dist/**",
       "maxDuration": 60,
       "memory": 1024
     }
