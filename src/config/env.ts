@@ -216,12 +216,26 @@ const parsed = envSchema
 	.safeParse(process.env)
 
 if (!parsed.success) {
-	// Fail loudly and readably — this is the first thing a new developer sees.
+	/*
+	 * Fail loudly and readably — this is the first thing a new developer sees,
+	 * and on a serverless host it is the *only* thing anybody sees.
+	 *
+	 * There, `process.exit(1)` below surfaces as a bare
+	 * `FUNCTION_INVOCATION_FAILED` with a 500 page and no reason on it. These
+	 * lines are in the runtime log and nowhere else, so they have to name both
+	 * the variable and where it is actually set — telling somebody to edit
+	 * `.env` is useless advice on a platform that has no `.env`.
+	 */
 	console.error("\n  Invalid environment configuration:\n")
 	for (const issue of parsed.error.issues) {
 		console.error(`   - ${issue.path.join(".")}: ${issue.message}`)
 	}
-	console.error("\n  Copy .env.example to .env and fill it in.\n")
+	console.error(
+		"\n  Locally: copy .env.example to .env and fill it in." +
+			"\n  On a host (Vercel/Render): set these in the project's environment" +
+			"\n  variables, then redeploy — changing them does not restart a" +
+			"\n  deployment on its own.\n"
+	)
 	process.exit(1)
 }
 
