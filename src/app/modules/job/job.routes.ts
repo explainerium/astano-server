@@ -1,6 +1,9 @@
-import { Router } from "express"
+import crypto from "crypto"
+import { Router, type RequestHandler } from "express"
 import { z } from "zod"
+import { env } from "../../../config"
 import { JOBS, type JobName } from "../../../jobs"
+import ApiError from "../../errors/ApiError"
 import { catchAsync } from "../../../shared/catchAsync"
 import { httpStatus } from "../../../shared/httpStatus"
 import { sendResponse } from "../../../shared/sendResponse"
@@ -71,5 +74,72 @@ AdminJobRoutes.post(
 		})
 	})
 )
+
+/**
+ * The same jobs, run by a scheduler over HTTP instead of by the clock.
+ *
+ * `node-cron` needs a process that stays alive. A serverless deployment has
+ * none — so on Vercel the schedule lives in `vercel.json` and calls this, and
+ * `startJobs()` never runs at all. On Render or the VPS the in-process timers
+ * do the work and this route simply sits unused.
+ *
+ * Not behind `auth()`: the caller is a scheduler, not a person, and it holds no
+ * session. `CRON_SECRET` is the whole of its identity, compared in constant
+ * time — a shared secret checked with `===` leaks its length and prefix to
+ * anybody willing to measure.
+ *
+ * With no secret configured the route refuses everything rather than running
+ * open. A deployment that does not schedule over HTTP should not have an
+ * unauthenticated way to delete rows.
+ */
+export const CronJobRoutes = Router()
+
+const authorised = (header: string | undefined): boolean => {
+	const secret = env.CRON_SECRET
+	if (!secret) return false
+
+	const offered = header?.startsWith("Bearer ") ? header.slice(7) : ""
+	const a = Buffer.from(offered)
+	const b = Buffer.from(secret)
+
+	// timingSafeEqual throws on a length mismatch, so that is checked first —
+	// and the lengths of two secrets are not themselves worth hiding.
+	return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+/**
+ * Runs every job, in the order the in-process schedule runs them.
+ *
+ * One endpoint rather than one per job, because Vercel's free plan allows two
+ * cron entries and there are five jobs. They are all idempotent and all cheap
+ * when there is nothing to do, so running the set together costs little and
+ * removes any question of which ones a schedule forgot.
+ */
+const runAll: RequestHandler = catchAsync(async (req, res) => {
+	if (!authorised(req.headers.authorization)) {
+		throw new ApiError(httpStatus.UNAUTHORIZED, "Not authorised", {
+			messageKey: "auth.required",
+		})
+	}
+
+	// `safely` wraps each one, so a single failure is logged and the rest still
+	// run — the whole point of a maintenance sweep.
+	for (const run of Object.values(JOBS)) await run()
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: { ran: Object.keys(JOBS), at: new Date().toISOString() },
+	})
+})
+
+/*
+ * GET, because that is what Vercel Cron sends — it invokes the path and has no
+ * way to be told otherwise. POST is kept alongside it so the same endpoint can
+ * be driven by hand, or by a scheduler with better manners, without the
+ * secret-checking logic existing twice.
+ */
+CronJobRoutes.get("/run", runAll)
+CronJobRoutes.post("/run", runAll)
 
 export default AdminJobRoutes

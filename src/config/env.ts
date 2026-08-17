@@ -128,6 +128,22 @@ const envSchema = z.object({
 	SMTP_PASS: z.string().optional(),
 	MAIL_FROM: z.string().optional(),
 
+	/**
+	 * Lets a scheduler run the maintenance jobs over HTTP.
+	 *
+	 * `node-cron` needs a process that stays alive, and a serverless deployment
+	 * has none — so on Vercel the schedule lives in `vercel.json` and calls back
+	 * into the API instead. This is what proves the caller is that scheduler:
+	 * Vercel Cron sends it as `Authorization: Bearer <CRON_SECRET>`.
+	 *
+	 * Unset means the HTTP route is refused outright rather than left open. A
+	 * long-running deployment (Render, the VPS) does not need it at all, because
+	 * there the jobs run in-process.
+	 *
+	 * Generate with: openssl rand -hex 32
+	 */
+	CRON_SECRET: z.string().optional(),
+
 	CORS_ORIGINS: z.string().default("http://localhost:3000"),
 	LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 

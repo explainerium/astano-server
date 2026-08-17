@@ -4,6 +4,7 @@ import express, { type Application, type Request, type Response } from "express"
 import helmet from "helmet"
 import httpStatus from "./shared/httpStatus"
 import { env, LOCALES, DEFAULT_LOCALE } from "./config"
+import ensureShopReady from "./app/middlewares/ensureShopReady"
 import globalErrorHandler from "./app/middlewares/globalErrorHandler"
 import notFound from "./app/middlewares/notFound"
 import { resolveLocale } from "./app/middlewares/resolveLocale"
@@ -45,6 +46,16 @@ app.use(httpLogger)
 
 // Must run before the router so /de/... resolves to the same handlers as /...
 app.use(resolveLocale)
+
+/*
+ * The payment methods and the tax matrix, made certain on the first request.
+ *
+ * `server.ts` does this at boot, which covers Render and the VPS. A serverless
+ * deployment never runs that file, so this is what stops a cold instance
+ * serving a checkout with nothing to pay with. Cached per instance and never
+ * awaited — see the middleware.
+ */
+app.use(ensureShopReady)
 
 // Index route — so hitting the server in a browser explains itself rather than
 // returning a bare 404.

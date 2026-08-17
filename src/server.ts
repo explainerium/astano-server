@@ -2,7 +2,6 @@ import type { Server } from "http"
 import app from "./app"
 import { env } from "./config"
 import { logger } from "./shared/logger"
-import { InvoiceService } from "./app/modules/invoice/invoice.service"
 import { PaymentService } from "./app/modules/payment/payment.service"
 import { TaxService } from "./app/modules/tax/tax.service"
 import { startJobs, stopJobs } from "./jobs"
@@ -50,9 +49,14 @@ const bootstrap = (): void => {
 
 const shutdown = (signal: string): void => {
 	logger.info(`${signal} received — shutting down`)
-	// Chromium outlives the node process unless it is told otherwise.
+	/*
+	 * Only the timers to stop now.
+	 *
+	 * This used to close a Chromium the invoice service kept alive between
+	 * requests, because it outlived the node process otherwise. Invoices are
+	 * drawn in-process now, so there is no browser and nothing to tidy.
+	 */
 	stopJobs()
-	void InvoiceService.closeBrowser()
 	if (server) {
 		server.close(() => process.exit(0))
 	} else {

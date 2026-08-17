@@ -149,8 +149,7 @@ services:
       - key: LOG_LEVEL
         value: info
 
-      # Puppeteer ships its own Chromium for invoice PDFs. On a 512 MB free
-      # instance launching it may run the process out of memory — see
-      # DEPLOYMENT.md. Leave the download enabled; if invoices are not needed
-      # for this round of testing, that is the one feature to expect trouble
-      # from.
+      # Nothing here for invoice PDFs any more. They used to need Puppeteer's
+      # own Chromium — 847 MB, and the one feature most likely to run a 512 MB
+      # instance out of memory. They are drawn in-process now (2.6 MB, no
+      # browser), so there is nothing to download and nothing to warn about.
