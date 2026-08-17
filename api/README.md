@@ -10,10 +10,61 @@ The decisions behind `../vercel.json`, which has nowhere to put a comment:
 | `rewrites: /(.*) → /api`        | One function serves everything. The routing already lives in `src/app/router`; splitting it across several functions would give each of them its own cold start and its own Prisma connection. |
 | `regions: ["fra1"]`             | Frankfurt, next to the Supabase database in Paris. A cross-region round trip was measured at 165 ms, and a product create makes twenty of them.                                                |
 | `maxDuration: 60`               | An invoice render and a checkout both do real work.                                                                                                                                            |
-| `buildCommand: npx prisma generate` | The generated client is not committed and Vercel builds from a clean cache. `npx`, not a bare `prisma`: a build command runs in a plain shell, which does not have `node_modules/.bin` on its PATH the way an npm script does — a bare `prisma` exits 127, "command not found". |
+| `buildCommand` → `npx prisma generate` | The generated client is not committed and Vercel builds from a clean cache. `npx`, not a bare `prisma`: a build command runs in a plain shell, which does not have `node_modules/.bin` on its PATH the way an npm script does — a bare `prisma` exits 127, "command not found". |
+| `buildCommand` → `npm run build` | We compile, Vercel does not. See below. |
+| `buildCommand` → `rm -rf node_modules/typescript` | **This is not a hack, it is a workaround for a bug in Vercel's own builder.** See below. |
 | `installCommand: npm ci --include=dev` | Vercel sets `NODE_ENV=production` for the build, and npm then skips devDependencies — where `prisma` and `typescript` both live. Without this the build fails looking for a Prisma CLI that was never installed. `render.yaml` carries the same flag for the same reason. |
 | **No `prisma migrate deploy`**  | Every preview deployment would otherwise migrate the production database. Migrations are run deliberately: `npx prisma migrate deploy` from a machine that means it.                           |
 | `crons`                         | `node-cron` needs a process that stays alive and Vercel has none, so the schedule lives with the platform and calls `GET /api/v1/cron/run`.                                                    |
+
+## Why TypeScript is deleted after the build
+
+`@vercel/node` decides which TypeScript to use like this (`dist/index.js`):
+
+```js
+try {
+  compiler = require.resolve("typescript", { paths: [cwd] })
+} catch {
+  compiler = "typescript"          // its own bundled 5.9.3
+}
+…
+if (!hasLegacyCompilerApi(loadedCompiler)) {
+  return registerNativeCompiler(options, cwd, loadedVersion)
+}
+```
+
+This project is on **TypeScript 7**, the native rewrite, which has no legacy
+compiler API — so the builder takes `registerNativeCompiler`, and that function
+begins:
+
+```js
+const compilerPath = (0, import_promises.readFile)(packageJsonPath, "utf8")
+```
+
+`import_promises` is undefined in their bundle. That is the whole of
+`Error: Cannot read properties of undefined (reading 'readFile')` — a broken
+import inside Vercel's builder, on a code path only a TypeScript 7 project
+reaches. Nothing about this repository is wrong, and no amount of changing the
+entry point avoids it: the compiler is registered before the entry is even
+looked at.
+
+Removing `node_modules/typescript` once our own build has finished makes that
+`require.resolve` throw, so the builder falls back to the TypeScript **it
+ships** — 5.9.3, which has the legacy API and works. Nothing is lost: the
+compile already happened, and the deployed artefact is JavaScript.
+
+Delete this step when Vercel fixes the bug, or when the project drops to
+TypeScript 5.
+
+## Why the build is ours and not Vercel's
+
+`api/index.js` is plain JavaScript and requires the compiled `dist/`. The build
+runs the same `tsc` and `tsconfig.json` as everything else, so the deployment
+gets the same `nodenext` module resolution and the same `react-jsx` setting the
+invoice PDF needs. `includeFiles: "dist/**"` is what guarantees it ships —
+`src/i18n/index.ts` reads its catalogues with a dynamic
+`require(\`./messages/${code}.json\`)`, which a file tracer has no reliable way
+to follow.
 
 ## What is different on Vercel
 
