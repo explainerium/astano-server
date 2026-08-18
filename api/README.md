@@ -134,8 +134,19 @@ Everything in `.env.example`, plus:
 | `CORS_ORIGINS`                      | The storefront's URL.                                                                                            |
 | `COOKIE_SAMESITE` / `COOKIE_SECURE` | `none` / `true`, while the API and the shop are on different hosts.                                              |
 
-`DATABASE_URL` should point at Supabase's **transaction** pooler (port `6543`)
-here rather than the session pooler (`5432`): serverless opens a connection per
-instance and the transaction pooler is what stops that exhausting the database.
-Prisma Migrate needs the session pooler, so keep `5432` in the `.env` you run
-migrations from.
+`DATABASE_URL` **must** point at Supabase's **transaction** pooler (port
+`6543`, with `?pgbouncer=true`) rather than the session pooler (`5432`).
+Prisma Migrate needs session mode, so keep `5432` in the `.env` you run
+migrations from — but nowhere else.
+
+Not a preference. The session pooler allows **fifteen clients in total, across
+everything that connects to the database**. Serverless opens its own pool per
+instance, so a handful of warm instances take all fifteen and then every query
+fails — including the ones from a developer's laptop, which is what makes it
+look like the database has gone down rather than run out of room. Supabase
+answers `XX000 (EMAXCONNSESSION) max clients reached in session mode`, which
+Prisma reports as P2010 and this API translates to "the database rejected this
+change" on whatever request happened to be passing.
+
+The pool size is capped to match: one connection per serverless instance, five
+for a long-running server. See `poolSize()` in `src/shared/prisma.ts`.

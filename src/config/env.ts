@@ -26,6 +26,21 @@ const envSchema = z.object({
 
 	DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
+	/**
+	 * How many database connections one process may hold open.
+	 *
+	 * Left unset the driver opens up to ten, which is a sensible default for a
+	 * server and the wrong one everywhere this deploys. Supabase's session
+	 * pooler allows fifteen *in total*, so a single development server takes two
+	 * thirds of them and a couple of serverless instances finish the job — after
+	 * which every query, local ones included, fails with
+	 * "max clients reached in session mode" and the shop looks like it has lost
+	 * its database.
+	 *
+	 * Defaulted rather than required: see poolSize() in shared/prisma.
+	 */
+	DATABASE_POOL_SIZE: z.coerce.number().int().positive().max(50).optional(),
+
 	// Auth — placeholders are fine in development, never in production. Enforced
 	// at the bottom of this file, not merely asked for in this comment.
 	JWT_ACCESS_SECRET: z.string().min(1).default(DEV_JWT_SECRETS.access),
