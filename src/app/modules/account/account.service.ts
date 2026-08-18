@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt"
 import type { Address, Prisma } from "@prisma/client"
-import { env } from "../../../config"
+import { env, shopUrl } from "../../../config"
 import { localePrefix, type LocaleCode } from "../../../config/locales"
 import { sendEmailChanged, sendEmailChangeVerification } from "../../../helpers/mailer"
 import { t } from "../../../i18n"
@@ -100,21 +100,8 @@ const updateProfile = async (
 
 const EMAIL_CHANGE_TTL = "24h"
 
-/**
- * Where the confirmation link points.
- *
- * Duplicates the frontend's own routing map, which is unavoidable — the mail is
- * composed here and the page lives there. Keep in step with `pathnames` in
- * frontend/src/i18n/routing.ts; the proxy carries the same warning for the same
- * reason.
- */
-const VERIFY_PATH: Record<string, string> = {
-	en: "/verify-email",
-	de: "/e-mail-bestaetigen",
-}
-
 const verifyUrl = (locale: LocaleCode, token: string): string =>
-	`${env.PUBLIC_BASE_URL}${localePrefix(locale)}${VERIFY_PATH[locale] ?? VERIFY_PATH.en}?token=${token}`
+	shopUrl("verifyEmail", locale, { token })
 
 const sendVerification = async (to: string, locale: LocaleCode, token: string): Promise<void> => {
 	// Composed in the mailer like every other message, so it picks up the shop's

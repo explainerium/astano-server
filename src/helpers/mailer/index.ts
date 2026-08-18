@@ -1,4 +1,4 @@
-import { env } from "../../config"
+import { env, shopUrl } from "../../config"
 import type { LocaleCode } from "../../config/locales"
 import { t } from "../../i18n"
 import type { BankAccount } from "../../domain/payment/bankAccounts"
@@ -305,7 +305,9 @@ export const sendPasswordReset = async (input: {
 	token: string
 }): Promise<void> => {
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
-	const link = url(`/reset-password?token=${input.token}`)
+	// Localised, and built from SHOP_BASE_URL — the slug differs per language
+	// and the link has to open a page, not this API. See config/shopLinks.
+	const link = shopUrl("resetPassword", input.locale, { token: input.token })
 
 	await dispatch("password-reset", {
 		to: input.to,
