@@ -122,6 +122,22 @@ one instance — but it is not the guarantee it is on a single long-running
 server. A shared store (Redis/Upstash) is what fixes it properly, if this ever
 becomes more than a test deployment.
 
+## One key, every environment
+
+`CREDENTIALS_KEY` encrypts the credentials that live in the database — the SMTP
+password today, payment keys later. **Every deployment that shares a database
+must carry the same value**, and this one shares Supabase with a developer's
+laptop.
+
+It does not fail loudly when they differ. The setting saves, the admin screen
+shows it as set, and the decrypt throws only when something tries to send — as
+`Missing credentials for "PLAIN"`, which reads like a wrong password rather than
+a wrong key. The line above it in the log says what actually happened.
+
+Changing the value orphans everything already stored under the old one. That is
+recoverable — re-enter the credential in the admin screen — but it has to be
+done once per credential, so pick a value and leave it.
+
 ## Environment
 
 Everything in `.env.example`, plus:

@@ -1,4 +1,5 @@
 import crypto from "crypto"
+import { waitUntil } from "@vercel/functions"
 import nodemailer, { type Transporter } from "nodemailer"
 import { SettingService } from "../../app/modules/setting/setting.service"
 import { env } from "../../config"
@@ -109,10 +110,76 @@ const build = (config: SmtpConfig): Transporter => {
 		// 465 is implicit TLS; everything else upgrades with STARTTLS.
 		secure: config.port === 465,
 		...(config.user ? { auth: { user: config.user, pass: config.pass } } : {}),
+		// Nodemailer waits two minutes by default, which outlives every deadline
+		// around it — the serverless budget, the admin screen's own timeout, and
+		// the patience of whoever is watching a spinner.
+		connectionTimeout: 15_000,
+		greetingTimeout: 15_000,
+		socketTimeout: 30_000,
 	})
 
 	cached = { key, transport }
 	return transport
+}
+
+/**
+ * Failures worth trying again, and failures that are answers.
+ *
+ * A refused password is a configuration problem: retrying it three times gets
+ * the account locked and tells nobody anything. A connection that timed out is
+ * not — mail servers throttle bursts, and netcup dropped five consecutive
+ * connections during a test that sent twenty-two messages back to back, all of
+ * which went through on the next attempt.
+ *
+ * The distinction matters because these sends are unattended. Nothing retries
+ * an order confirmation by hand; if it is lost here it is lost, and the
+ * customer is left holding a receipt the shop never acknowledged.
+ */
+const TRANSIENT = new Set(["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "EHOSTUNREACH", "ESOCKET", "EDNS"])
+
+const isTransient = (error: unknown): boolean => {
+	const code = (error as { code?: string })?.code
+	return Boolean(code && TRANSIENT.has(code))
+}
+
+/*
+ * Two attempts, three seconds apart, against a fifteen-second connect timeout:
+ * a worst case of about thirty-three seconds.
+ *
+ * Sized by the platform, not by taste. Vercel gives the function sixty seconds
+ * and `waitUntil` does not extend that, so a retry chain that could run to
+ * seventy-two — which the first version did — is a chain the instance gets
+ * killed in the middle of. Losing the email to our own timeout instead of the
+ * mail server's is not an improvement.
+ */
+const ATTEMPTS = 2
+const BACKOFF_MS = 3_000
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * One send, retried while the failure looks like the network rather than us.
+ *
+ * Deliberately linear rather than exponential: the thing being waited out is a
+ * few seconds of server-side throttling, and a third attempt sixteen seconds
+ * later is past the point where a serverless instance is still being held open
+ * for it.
+ */
+const deliver = async (transport: Transporter, message: Parameters<Transporter["sendMail"]>[0]): Promise<void> => {
+	for (let attempt = 1; ; attempt += 1) {
+		try {
+			await transport.sendMail(message)
+			return
+		} catch (error) {
+			if (attempt >= ATTEMPTS || !isTransient(error)) throw error
+
+			logger.warn(
+				{ err: error, attempt, of: ATTEMPTS },
+				"the mail server did not accept the connection — trying again"
+			)
+			await delay(BACKOFF_MS)
+		}
+	}
 }
 
 const getTransport = async (): Promise<Transporter | null> => {
@@ -145,7 +212,28 @@ export const sendMail = (mail: Mail, context: Record<string, unknown> = {}): voi
 		return
 	}
 
-	void (async () => {
+	/*
+	 * Registered with the platform on serverless, simply started elsewhere.
+	 *
+	 * A long-running server keeps running after it has answered, so an unawaited
+	 * send finishes on its own — which is the whole design above, and the reason
+	 * an order does not fail because a mail server is slow.
+	 *
+	 * A serverless instance does not. It is **frozen the moment the response is
+	 * sent**, mid-TLS-handshake if that is where the send happened to be, and
+	 * thawed later for an unrelated request by which time the socket is long
+	 * dead. The email is not delayed, it is lost, and nothing anywhere records
+	 * that it was — the log line saying it failed never runs either.
+	 *
+	 * `waitUntil` is the platform's answer: it holds the instance open until
+	 * the promise settles, without holding up the response. Outside Vercel it is
+	 * neither needed nor available, hence the guard.
+	 *
+	 * Note this is exactly why the test-send button uses `sendMailNow`, which
+	 * awaits: a test that passed while every real email vanished would be worse
+	 * than no test at all.
+	 */
+	const work = (async () => {
 		const transport = await getTransport()
 
 		if (!transport) {
@@ -157,7 +245,7 @@ export const sendMail = (mail: Mail, context: Record<string, unknown> = {}): voi
 			return
 		}
 
-		await transport.sendMail({
+		await deliver(transport, {
 			from: await resolveFrom(),
 			to: mail.to,
 			subject: mail.subject,
@@ -170,6 +258,8 @@ export const sendMail = (mail: Mail, context: Record<string, unknown> = {}): voi
 	})().catch((error: unknown) =>
 		logger.error({ err: error, to: mail.to, subject: mail.subject, ...context }, "email FAILED")
 	)
+
+	if (process.env.VERCEL) waitUntil(work)
 }
 
 /**
@@ -206,6 +296,9 @@ export const sendMailNow = async (mail: Mail): Promise<SendResult> => {
 	const where = { source: config.source, host: `${config.host}:${config.port}` }
 
 	try {
+		// One attempt, deliberately. `deliver` retries because nothing is watching
+		// an order confirmation; here somebody is, and a timeout repeated twice is
+		// the same answer thirty seconds later.
 		await build(config).sendMail({
 			from: await resolveFrom(),
 			to: mail.to,
