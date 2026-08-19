@@ -196,6 +196,23 @@ const toPublicProduct = (
 		id: row.id,
 		slug: t?.slug ?? row.id,
 		name: t?.name ?? "(untitled)",
+
+		/**
+		 * Whether this product can be bought on its own.
+		 *
+		 * An OPTION product — engraving, a coating, a gift box — is a real
+		 * product with its own SKU, MOQ and tier ladder, and it has a page,
+		 * because the configurator links to it and a customer deciding between
+		 * two packagings needs to read about them. What it does not have is a
+		 * way to be ordered by itself: forty-three of the fifty-five products in
+		 * the catalogue exist only to be ticked inside a bundle.
+		 *
+		 * Sent as a fact about the product rather than left for the storefront to
+		 * infer. The alternative was for the page to guess from the absence of
+		 * something, and a page that guesses wrong here offers a Buy button for
+		 * an order that cannot be placed.
+		 */
+		purchasableAlone: row.kind !== "OPTION",
 		shortDescription: t?.shortDescription ?? null,
 		description: t?.description ?? null,
 		metaTitle: t?.metaTitle ?? null,

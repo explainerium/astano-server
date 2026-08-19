@@ -1,10 +1,11 @@
 import type { LocaleCode } from "../../../config/locales"
 import { prisma } from "../../../shared/prisma"
 import { httpStatus } from "../../../shared/httpStatus"
-import { interpolate } from "../../../i18n"
+import { interpolate, t } from "../../../i18n"
 import { readBranding, type EmailBranding } from "../../../domain/email/branding"
 import { captureMail, mailContext } from "../../../helpers/mailer/context"
-import { isConfigured } from "../../../helpers/mailer/transport"
+import { esc } from "../../../helpers/mailer/layout"
+import { isConfigured, sendMailNow } from "../../../helpers/mailer/transport"
 import ApiError from "../../errors/ApiError"
 import { SettingService } from "../setting/setting.service"
 import { sendSample } from "./emailSamples"
@@ -165,7 +166,46 @@ const sendTest = async (kind: EmailKind, locale: LocaleCode, to: string) => {
 		})
 	}
 
-	await sendSample(kind, to, locale)
+	/*
+	 * Composed, marked, then sent — rather than sent straight out.
+	 *
+	 * A sample is otherwise indistinguishable from the real thing in an inbox,
+	 * and the samples carry deliberately dead data: the password-reset one links
+	 * to `?token=sample-token-not-valid`. Somebody received one, took it for a
+	 * real reset, and reported the broken link as a bug in password recovery —
+	 * which cost an afternoon to trace back to a preview.
+	 *
+	 * The banner sits above the message rather than replacing anything, so what
+	 * the admin is checking — branding, wording, whether it arrives at all — is
+	 * still exactly what a customer would get.
+	 */
+	const { mails } = await captureMail(() => sendSample(kind, to, locale), { ignoreDisabled: true })
+	const mail = mails[0]
+
+	if (!mail) {
+		throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, "That email produced nothing to send", {
+			messageKey: "email.previewFailed",
+		})
+	}
+
+	const notice = t("email.sampleNotice", locale)
+
+	const result = await sendMailNow({
+		to,
+		subject: `[${t("email.sampleTag", locale)}] ${mail.subject}`,
+		html: `<div style="background:#fff4e5;border:1px solid #ffcc80;border-radius:6px;padding:12px 16px;margin:0 0 16px;font:14px/1.5 Arial,sans-serif;color:#7a4f00;">${esc(notice)}</div>${mail.html}`,
+		text: `${notice}
+
+${mail.text}`,
+	})
+
+	// Reported, not assumed. The admin asked whether it arrives; "we handed it
+	// to a socket" is not an answer, and sendSample's own path is
+	// fire-and-forget by design.
+	if (!result.ok) {
+		throw new ApiError(httpStatus.BAD_GATEWAY, result.message, { messageKey: "email.sendFailed" })
+	}
+
 	return { sent: true as const, to }
 }
 

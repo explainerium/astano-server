@@ -342,5 +342,8 @@
 	"email.b2bReceived.title": "Your dealer application has arrived",
 	"email.b2bReceived.intro": "Thank you, {name} — we have received the dealer application for {company} and will review it shortly.",
 	"email.b2bReceived.next": "Your account is already set up and you can sign in, but dealer prices only appear once the application has been approved. We will email you as soon as that happens.",
-	"email.b2bReceived.action": "Go to your account"
+	"email.b2bReceived.action": "Go to your account",
+	"email.sampleTag": "Sample",
+	"email.sampleNotice": "This is a sample sent from the shop admin to check how emails look. It is not a real message — any link or code in it is placeholder data and will not work.",
+	"email.sendFailed": "The mail server refused the message."
 }
