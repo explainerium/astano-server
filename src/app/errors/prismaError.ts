@@ -92,6 +92,27 @@ export const translatePrismaError = (error: unknown): TranslatedPrismaError | nu
 				fallback: "This change would break a link to another record.",
 			}
 
+		/*
+		 * The transaction ran out of time.
+		 *
+		 * Named rather than left to the default, because the default is a lie
+		 * here: nothing was rejected. The database was still willing, the work
+		 * simply took longer than the transaction was allowed. Reported as
+		 * "rejected", it sent us looking for a constraint violation in a product
+		 * update that had none — the tier ladder just silently failed to save
+		 * and the admin was told the data was bad.
+		 *
+		 * 408 rather than 400: this is a timeout, and retrying the same request
+		 * unchanged is a reasonable thing for the caller to do.
+		 */
+		case "P2028":
+			return {
+				statusCode: httpStatus.REQUEST_TIMEOUT,
+				messageKey: "error.transactionTimeout",
+				messageVars: {},
+				fallback: "That save took too long and was rolled back. Please try again.",
+			}
+
 		default:
 			return {
 				statusCode: httpStatus.BAD_REQUEST,

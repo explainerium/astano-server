@@ -1427,6 +1427,8 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 			}
 		}
 
+		const touched: { variantId: string; prices?: any[]; tiers?: any[] }[] = []
+
 		for (const v of payload.variants ?? []) {
 			/**
 			 * Only keys the caller actually sent.
@@ -1473,20 +1475,58 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 						})
 					).id
 
-			if (v.prices) {
-				await tx.variantPrice.deleteMany({ where: { variantId } })
-				await tx.variantPrice.createMany({
-					data: v.prices.map((p: any) => ({ ...p, variantId })),
-				})
-			}
-
-			if (v.tiers) {
-				await tx.variantPriceTier.deleteMany({ where: { variantId } })
-				await tx.variantPriceTier.createMany({
-					data: v.tiers.map((t: any) => ({ ...t, variantId })),
-				})
-			}
+			// Collected rather than written here — see below.
+			touched.push({ variantId, prices: v.prices, tiers: v.tiers })
 		}
+
+		/*
+		 * Every variant's prices and ladders in four statements, not four per
+		 * variant.
+		 *
+		 * Written inside the loop this was five round trips per variant, and a
+		 * round trip to the database is about 150 ms from here. A four-variant
+		 * product needed forty-two statements and took 6.4 seconds — past
+		 * Prisma's transaction timeout, which surfaced as P2028 and reached the
+		 * admin as "the database rejected this change" while the ladder simply
+		 * did not save.
+		 *
+		 * The variants themselves still go one at a time: each carries different
+		 * data and a new one has to hand back the id these rows hang off.
+		 */
+		const withPrices = touched.filter((t) => t.prices)
+		if (withPrices.length) {
+			await tx.variantPrice.deleteMany({
+				where: { variantId: { in: withPrices.map((t) => t.variantId) } },
+			})
+			const rows = withPrices.flatMap((t) =>
+				(t.prices as any[]).map((price) => ({ ...price, variantId: t.variantId }))
+			)
+			if (rows.length) await tx.variantPrice.createMany({ data: rows })
+		}
+
+		const withTiers = touched.filter((t) => t.tiers)
+		if (withTiers.length) {
+			await tx.variantPriceTier.deleteMany({
+				where: { variantId: { in: withTiers.map((t) => t.variantId) } },
+			})
+			const rows = withTiers.flatMap((t) =>
+				(t.tiers as any[]).map((tier) => ({ ...tier, variantId: t.variantId }))
+			)
+			if (rows.length) await tx.variantPriceTier.createMany({ data: rows })
+		}
+	}, {
+		/*
+		 * Prisma's default is five seconds, and this transaction does not fit in
+		 * it. Even batched, a product with many variants is a long chain of
+		 * statements against a database two countries away, and the failure mode
+		 * of being a little too slow is a save that reports an error and loses
+		 * the edit.
+		 *
+		 * Thirty is well inside the sixty-second serverless ceiling, so the
+		 * platform still stops a genuinely stuck transaction.
+		 */
+		timeout: 30_000,
+		maxWait: 10_000,
 	})
 
 	return adminGetById(id, locale)

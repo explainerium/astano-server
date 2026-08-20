@@ -345,5 +345,6 @@
 	"email.b2bReceived.action": "Go to your account",
 	"email.sampleTag": "Sample",
 	"email.sampleNotice": "This is a sample sent from the shop admin to check how emails look. It is not a real message — any link or code in it is placeholder data and will not work.",
-	"email.sendFailed": "The mail server refused the message."
+	"email.sendFailed": "The mail server refused the message.",
+	"error.transactionTimeout": "That save took too long and was rolled back. Please try again."
 }

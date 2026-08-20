@@ -345,5 +345,6 @@
 	"email.b2bReceived.action": "Zu Ihrem Konto",
 	"email.sampleTag": "Beispiel",
 	"email.sampleNotice": "Dies ist eine Beispielnachricht aus der Shop-Verwaltung, um das Aussehen der E-Mails zu prüfen. Es ist keine echte Nachricht — enthaltene Links oder Codes sind Platzhalter und funktionieren nicht.",
-	"email.sendFailed": "Der Mailserver hat die Nachricht abgelehnt."
+	"email.sendFailed": "Der Mailserver hat die Nachricht abgelehnt.",
+	"error.transactionTimeout": "Das Speichern hat zu lange gedauert und wurde zurückgenommen. Bitte versuchen Sie es erneut."
 }
