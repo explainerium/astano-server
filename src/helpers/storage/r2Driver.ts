@@ -7,6 +7,7 @@ import {
 } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { env } from "../../config"
+import { logger } from "../../shared/logger"
 import type { PutObject, StorageDriver, Visibility } from "./types"
 
 /**
@@ -62,6 +63,29 @@ const bucketFor = (visibility: Visibility): string => {
 	return bucket
 }
 
+/**
+ * Said once, the first time a URL is built without somewhere to point it.
+ *
+ * Unset, `publicUrl` returns `/2026/08/x.webp` — a *relative* URL, which the
+ * browser resolves against the storefront and which 404s. Every image on the
+ * site breaks, and nothing anywhere says why: the API answered 200, the product
+ * has an image, and the URL looks almost right.
+ *
+ * Raised here rather than at boot because a deployment is entitled to run
+ * without object storage configured until something actually needs it.
+ */
+let warnedNoPublicUrl = false
+
+const warnIfNoPublicUrl = (): void => {
+	if (warnedNoPublicUrl || env.R2_PUBLIC_URL) return
+
+	warnedNoPublicUrl = true
+	logger.error(
+		"R2_PUBLIC_URL is not set while the S3 driver is selected — every image URL is " +
+			"relative and will 404. Set it to the bucket's public base, including the bucket name."
+	)
+}
+
 export const r2Driver: StorageDriver = {
 	name: "r2",
 
@@ -85,6 +109,7 @@ export const r2Driver: StorageDriver = {
 	publicUrl(key: string): string {
 		// R2 public buckets are served through a custom domain or the r2.dev
 		// subdomain; either way it is configuration, not something to derive.
+		warnIfNoPublicUrl()
 		return `${env.R2_PUBLIC_URL ?? ""}/${key}`
 	},
 
