@@ -97,6 +97,19 @@ app.get("/", (req: Request, res: Response) => {
 		data: {
 			version: "v1",
 			env: env.NODE_ENV,
+
+			/*
+			 * Which commit is actually answering.
+			 *
+			 * Added after an afternoon spent asking whether a fix was deployed and
+			 * having no way to tell: the symptom was identical before and after,
+			 * and the only honest answer was "redeploy and see". One request
+			 * settles it now.
+			 *
+			 * `VERCEL_GIT_COMMIT_SHA` is set by the platform. Null anywhere else,
+			 * which is itself informative — it means this is not a Vercel build.
+			 */
+			commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
 			locale: req.locale,
 			endpoints: {
 				health: "/health",

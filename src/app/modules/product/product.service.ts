@@ -982,11 +982,32 @@ interface TranslationInput {
 	metaDescription?: string
 }
 
-const resolveSlug = async (t: TranslationInput, excludeProductId?: string): Promise<string> => {
+/**
+ * A slug nothing else is using, checked on the caller's own connection.
+ *
+ * `client` is the reason this takes a parameter at all. Called from inside an
+ * interactive transaction, the global `prisma` asks the pool for a *second*
+ * connection — and the transaction is already holding one. On a serverless
+ * instance, where the pool is capped at one connection because that is all an
+ * instance needs, the second request can never be satisfied: the query waits
+ * for a connection the transaction will not release until the query returns.
+ *
+ * It deadlocks until the transaction times out, which surfaced as a product
+ * update that spun for thirty seconds and then reported "that save took too
+ * long". Locally it never happened — a five-connection pool always had a spare.
+ *
+ * So a caller inside a transaction passes `tx`, and the lookup runs on the
+ * connection that is already held.
+ */
+const resolveSlug = async (
+	t: TranslationInput,
+	excludeProductId?: string,
+	client: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<string> => {
 	const base = t.slug ?? slugify(t.name, t.locale as LocaleCode)
 
 	return uniqueSlug(base || "product", async (candidate) => {
-		const clash = await prisma.productTranslation.findFirst({
+		const clash = await client.productTranslation.findFirst({
 			where: {
 				locale: t.locale,
 				slug: candidate,
@@ -1311,7 +1332,7 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 		})
 
 		for (const t of payload.translations ?? []) {
-			const slug = await resolveSlug(t, id)
+			const slug = await resolveSlug(t, id, tx)
 			await tx.productTranslation.upsert({
 				where: { productId_locale: { productId: id, locale: t.locale } },
 				create: {

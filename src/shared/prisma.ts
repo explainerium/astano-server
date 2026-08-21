@@ -21,17 +21,25 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
  * answers "the database rejected this change", on a database that is perfectly
  * healthy and simply has no free slot to answer from.
  *
- * One per serverless instance, because an instance handles one request at a
- * time — a second connection would sit idle holding a slot some other instance
- * needs. Five for a long-running server, which does serve requests
- * concurrently, and which is still a third of the pooler rather than
- * two thirds.
+ * Five everywhere, serverless included.
  *
- * `VERCEL` is set by the platform on every deployment, so neither environment
- * needs a variable set by hand. `DATABASE_POOL_SIZE` overrides both, for the
- * VPS move where the database is ours and the ceiling is not fifteen.
+ * One per serverless instance was the first answer, on the reasoning that an
+ * instance handles one request at a time. It handles one *request* — not one
+ * query. Half this codebase fans out with `Promise.all`, and the seeding
+ * middleware starts work it deliberately does not await, so a single request
+ * routinely wants three or four connections at once. With a pool of one they
+ * queue behind each other, and a product save took twice as long as it needed
+ * to; worse, a transaction holding the only connection while something else
+ * waited for one is a deadlock waiting for a reason to happen.
+ *
+ * Five is safe now in a way it was not before: the deployment moved to
+ * Supabase's transaction pooler, whose ceiling is far above the session
+ * pooler's fifteen. That fifteen is what made one look prudent.
+ *
+ * `DATABASE_POOL_SIZE` overrides it, for the VPS move where the database is
+ * ours and there is no pooler in the way.
  */
-const poolSize = (): number => env.DATABASE_POOL_SIZE ?? (process.env.VERCEL ? 1 : 5)
+const poolSize = (): number => env.DATABASE_POOL_SIZE ?? 5
 
 const createClient = (): PrismaClient => {
 	const adapter = new PrismaPg({

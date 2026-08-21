@@ -180,15 +180,28 @@ const getById = async (id: string, locale: LocaleCode): Promise<CategoryView> =>
 	return view(row, locale)
 }
 
-/** Derives a slug when one was not supplied, and guarantees uniqueness per locale. */
+/**
+ * Derives a slug when one was not supplied, and guarantees uniqueness per locale.
+ *
+ * `client` is not optional decoration. Called from inside an interactive
+ * transaction, the global `prisma` asks the pool for a second connection while
+ * the transaction is still holding the first — and a serverless instance runs
+ * with a pool of one. The lookup then waits for a connection that only the
+ * transaction can release, and the transaction cannot finish until the lookup
+ * returns. It deadlocks until the transaction times out.
+ *
+ * The product service had the same fault and it presented as "that save took
+ * too long" on every edit. Callers inside a transaction pass `tx`.
+ */
 const resolveSlug = async (
 	t: TranslationInput,
-	excludeCategoryId?: string
+	excludeCategoryId?: string,
+	client: Prisma.TransactionClient | typeof prisma = prisma
 ): Promise<string> => {
 	const base = t.slug ?? slugify(t.name, t.locale as LocaleCode)
 
 	return uniqueSlug(base || "category", async (candidate) => {
-		const clash = await prisma.categoryTranslation.findFirst({
+		const clash = await client.categoryTranslation.findFirst({
 			where: {
 				locale: t.locale,
 				slug: candidate,
@@ -299,7 +312,7 @@ const update = async (
 		})
 
 		for (const t of payload.translations ?? []) {
-			const slug = await resolveSlug(t, id)
+			const slug = await resolveSlug(t, id, tx)
 			await tx.categoryTranslation.upsert({
 				where: { categoryId_locale: { categoryId: id, locale: t.locale } },
 				create: {
