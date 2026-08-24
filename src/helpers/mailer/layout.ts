@@ -31,6 +31,16 @@ const paragraphs = (value: string, style: string): string =>
 
 export interface LayoutInput {
 	title: string
+	/**
+	 * The opening copy. Blank lines start a new paragraph, single ones break.
+	 *
+	 * Rendered through `paragraphs` rather than as one escaped `<p>`, because
+	 * the order confirmation opens with a greeting, a thank-you and a note about
+	 * what happens next — three things the client wrote as three lines. Forced
+	 * into a single paragraph they ran together into a wall of text, and the
+	 * only alternative was markup in a translation file, which is how a
+	 * translator ends up able to break the layout.
+	 */
 	intro: string
 	bodyHtml: string
 	company: CompanyDetails
@@ -94,7 +104,7 @@ export const renderLayout = ({
         </td></tr>
         <tr><td style="padding:32px;color:${textColour};">
           <h1 style="margin:0 0 16px;font-size:20px;color:${textColour};">${escapeHtml(title)}</h1>
-          <p style="margin:0 0 20px;font-size:15px;line-height:1.5;">${escapeHtml(intro)}</p>
+          ${paragraphs(intro, "margin:0 0 14px;font-size:15px;line-height:1.6;")}
           ${bodyHtml}
           ${
 						action
@@ -118,6 +128,18 @@ export const renderLayout = ({
 </body>
 </html>`
 }
+
+/** A titled block inside the body — "Wie geht es weiter?", "Ihre Zahlungsmethode". */
+export const section = (title: string, html: string): string =>
+	`<h2 style="margin:28px 0 10px;font-size:16px;">${escapeHtml(title)}</h2>${html}`
+
+/**
+ * Body copy inside a section — same paragraph and line-break rules as the
+ * intro, so copy written in the translation files reads the same wherever it
+ * is placed.
+ */
+export const bodyText = (value: string): string =>
+	paragraphs(value, "margin:0 0 10px;font-size:14px;line-height:1.6;")
 
 /** Money/label rows for order and quote summaries. */
 export const rowsTable = (rows: { label: string; value: string; strong?: boolean }[]): string => `

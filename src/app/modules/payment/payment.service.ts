@@ -4,7 +4,9 @@ import type { UserRole } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { readBankAccounts } from "../../../domain/payment/bankAccounts"
 import { DEFAULT_RULES, OFFLINE_METHODS } from "../../../domain/payment/offlineMethods"
+import { previousOrdersWhere } from "../../../domain/payment/orderHistory"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
+import { effectiveRole } from "../../../domain/pricing/effectiveRole"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
@@ -29,6 +31,7 @@ const adminView = (row: MethodRow, locale: LocaleCode) => ({
 		allowedRoles: row.allowedRoles,
 		requiresLogin: row.requiresLogin,
 		minCompletedOrders: row.minCompletedOrders,
+		historyExemptRoles: row.historyExemptRoles,
 		minOrderTotal: row.minOrderTotal?.toString() ?? null,
 		maxOrderTotal: row.maxOrderTotal?.toString() ?? null,
 		requiresValidatedVatId: row.requiresValidatedVatId,
@@ -66,6 +69,19 @@ const publicView = (row: MethodRow, locale: LocaleCode) => {
 		description: t?.description ?? null,
 		instructions: t?.instructions ?? null,
 		bankAccounts: readBankAccounts(row.config),
+
+		/*
+		 * The value window, so the storefront can say what the limit is rather
+		 * than only that one was hit.
+		 *
+		 * "Not available for this order" tells a customer nothing they can act
+		 * on; "available up to €10,000" tells them whether to split the order,
+		 * pay another way, or call. The rules are printed on the page anyway —
+		 * see the note on the eligibility payload — so nothing is revealed here
+		 * that the checkout does not already state in words.
+		 */
+		minOrderTotal: row.minOrderTotal?.toString() ?? null,
+		maxOrderTotal: row.maxOrderTotal?.toString() ?? null,
 	}
 }
 
@@ -150,6 +166,7 @@ const update = async (id: string, payload: Record<string, unknown>, locale: Loca
 				...(payload.allowedRoles !== undefined ? { allowedRoles: payload.allowedRoles as UserRole[] } : {}),
 				...(payload.requiresLogin !== undefined ? { requiresLogin: payload.requiresLogin as boolean } : {}),
 				...(payload.minCompletedOrders !== undefined ? { minCompletedOrders: payload.minCompletedOrders as number } : {}),
+				...(payload.historyExemptRoles !== undefined ? { historyExemptRoles: payload.historyExemptRoles as UserRole[] } : {}),
 				...(payload.minOrderTotal !== undefined ? { minOrderTotal: payload.minOrderTotal != null ? String(payload.minOrderTotal) : null } : {}),
 				...(payload.maxOrderTotal !== undefined ? { maxOrderTotal: payload.maxOrderTotal != null ? String(payload.maxOrderTotal) : null } : {}),
 				...(payload.requiresValidatedVatId !== undefined ? { requiresValidatedVatId: payload.requiresValidatedVatId as boolean } : {}),
@@ -202,6 +219,16 @@ const available = async (
 
 	let completedOrders = 0
 	let hasValidatedVatId = false
+	/*
+	 * Guest until the account says otherwise.
+	 *
+	 * The caller passes the role off the access token, which is the *stored*
+	 * role and says nothing about whether the account has been approved. A B2B
+	 * registration creates a RESELLER row immediately and waits on a person, so
+	 * a token minted in between would satisfy a reseller-only payment method.
+	 * Resolved below from the account itself, exactly as prices are.
+	 */
+	let role: string | null = null
 	const billingCountry = ctx.countryCode ?? null
 
 	if (ctx.userId) {
@@ -216,11 +243,12 @@ const available = async (
 		 */
 		const [user, completed] = await Promise.all([
 			prisma.user.findUnique({ where: { id: ctx.userId } }),
-			prisma.order.count({ where: { userId: ctx.userId, status: "COMPLETED" } }),
+			prisma.order.count({ where: previousOrdersWhere(ctx.userId) }),
 		])
 
 		hasValidatedVatId = user?.vatValidated ?? false
 		completedOrders = completed
+		role = effectiveRole(user?.role, user?.status)
 	}
 
 	const verdicts = evaluateMethods(
@@ -233,13 +261,14 @@ const available = async (
 			allowedRoles: r.allowedRoles,
 			requiresLogin: r.requiresLogin,
 			minCompletedOrders: r.minCompletedOrders,
+			historyExemptRoles: r.historyExemptRoles,
 			minOrderTotal: r.minOrderTotal?.toString() ?? null,
 			maxOrderTotal: r.maxOrderTotal?.toString() ?? null,
 			requiresValidatedVatId: r.requiresValidatedVatId,
 		})),
 		{
 			isLoggedIn: Boolean(ctx.userId),
-			role: ctx.role ?? null,
+			role,
 			billingCountry,
 			completedOrders,
 			orderTotal: ctx.orderTotal,

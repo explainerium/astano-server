@@ -24,6 +24,13 @@ export interface PaymentMethodRules {
 	allowedRoles: string[]
 	requiresLogin: boolean
 	minCompletedOrders: number
+	/**
+	 * Roles `minCompletedOrders` is waived for. Empty means it applies to all.
+	 *
+	 * See the column's own note in payment.prisma for why this is an exemption
+	 * rather than a second threshold.
+	 */
+	historyExemptRoles?: string[]
 	minOrderTotal?: Numeric | null
 	maxOrderTotal?: Numeric | null
 	requiresValidatedVatId: boolean
@@ -98,7 +105,16 @@ export const evaluateMethod = (
 		if (!ctx.role || !method.allowedRoles.includes(ctx.role)) return no("ROLE_NOT_ALLOWED")
 	}
 
-	if (method.minCompletedOrders > 0 && ctx.completedOrders < method.minCompletedOrders) {
+	/*
+	 * Order history, unless this customer's role is excused it.
+	 *
+	 * The exemption is checked before the count rather than after, so an exempt
+	 * role never has to have ordered at all — which is the whole point: an
+	 * approved reseller is trusted by a decision somebody made, not by a number.
+	 */
+	const exempt = Boolean(ctx.role && method.historyExemptRoles?.includes(ctx.role))
+
+	if (!exempt && method.minCompletedOrders > 0 && ctx.completedOrders < method.minCompletedOrders) {
 		return no("NOT_ENOUGH_ORDER_HISTORY")
 	}
 

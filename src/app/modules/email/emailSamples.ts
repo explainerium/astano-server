@@ -23,7 +23,10 @@ const SAMPLES: Record<EmailKind, (to: string, locale: LocaleCode) => Promise<voi
 			to,
 			locale,
 			orderNumber: "AST-000128",
-			customerName: CUSTOMER.name,
+			// The full name, because the greeting is "Guten Tag Anna Schmidt," and
+			// a preview showing only a first name would not reveal a layout that
+			// breaks on a long one.
+			customerName: CUSTOMER.full,
 			subtotal: "249.00",
 			shippingTotal: "8.90",
 			taxTotal: "49.00",
@@ -33,8 +36,11 @@ const SAMPLES: Record<EmailKind, (to: string, locale: LocaleCode) => Promise<voi
 				{ name: "Backblech 60 × 40 cm, gelocht", quantity: 4, lineTotal: "156.00" },
 				{ name: "Auszugsrahmen Edelstahl", quantity: 1, lineTotal: "93.00" },
 			],
-			paymentTitle: "Bank transfer",
-			paymentInstructions: "Please transfer the total within 14 days quoting the order number.",
+			paymentTitle: "Zahlung per Vorkasse",
+			// Written with the placeholders an admin would use, so the preview
+			// proves they resolve rather than only that the paragraph fits.
+			paymentInstructions:
+				"Sie haben Zahlung per Vorkasse ausgewählt.\nBitte überweisen Sie den Gesamtbetrag in Höhe von {total} auf folgendes Konto:",
 			bankAccounts: [
 				{
 					label: "Main account",
@@ -108,8 +114,30 @@ const SAMPLES: Record<EmailKind, (to: string, locale: LocaleCode) => Promise<voi
 			accessToken: "sample-token-not-valid",
 		}),
 
+	/*
+	 * Through the real sender, like the artwork notification below — this
+	 * message is the order summary and the button through to it, and the generic
+	 * `staff` helper would preview neither.
+	 */
 	"staff-new-order": (to, locale) =>
-		staff(to, locale, "staff-new-order", "New order AST-000128", "New order AST-000128", "Anna Schmidt placed an order for 306.90 EUR."),
+		mailer.notifyStaffOfOrder({
+			to,
+			locale,
+			orderId: "00000000-0000-0000-0000-000000000000",
+			orderNumber: "AST-000128",
+			customerName: CUSTOMER.full,
+			customerEmail: "anna.schmidt@example.com",
+			paymentTitle: "Zahlung auf Rechnung",
+			subtotal: "249.00",
+			shippingTotal: "8.90",
+			taxTotal: "49.00",
+			grandTotal: "306.90",
+			currency: "EUR",
+			items: [
+				{ name: "Backblech 60 × 40 cm, gelocht", quantity: 4, lineTotal: "156.00" },
+				{ name: "Auszugsrahmen Edelstahl", quantity: 1, lineTotal: "93.00" },
+			],
+		}),
 
 	"staff-new-quote": (to, locale) =>
 		staff(to, locale, "staff-new-quote", "New quote request RFQ-000042", "New quote request RFQ-000042", "Anna Schmidt sent a quote request: Custom trays, 600 × 400"),

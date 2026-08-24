@@ -1,11 +1,11 @@
 import { env, shopUrl } from "../../config"
 import type { LocaleCode } from "../../config/locales"
-import { t } from "../../i18n"
+import { interpolate, t } from "../../i18n"
 import type { BankAccount } from "../../domain/payment/bankAccounts"
 import { SettingService } from "../../app/modules/setting/setting.service"
 import { EmailService } from "../../app/modules/email/email.service"
 import type { EmailKind } from "../../app/modules/email/emailRegistry"
-import { esc, renderLayout, rowsTable, toPlainText } from "./layout"
+import { bodyText, esc, renderLayout, rowsTable, section, toPlainText } from "./layout"
 import { sendMail } from "./transport"
 
 export { isConfigured } from "./transport"
@@ -143,7 +143,20 @@ interface OrderMailInput {
  * Empty fields are dropped rather than shown blank, so a shop that only holds
  * an IBAN and BIC does not email a form with three gaps in it.
  */
-const bankAccountsHtml = (accounts: BankAccount[], L: (key: string) => string): string => {
+const bankAccountsHtml = (
+	accounts: BankAccount[],
+	L: (key: string) => string,
+	/**
+	 * What the customer must quote on the transfer — the order number.
+	 *
+	 * Part of the table rather than a sentence above it, because it is one more
+	 * thing to copy across into a banking app and belongs beside the IBAN they
+	 * are copying it with. A payment that arrives with no reference has to be
+	 * matched to an order by hand, and until somebody does, the customer is
+	 * waiting on an order the shop believes is unpaid.
+	 */
+	reference?: string
+): string => {
 	if (!accounts.length) return ""
 
 	return accounts
@@ -155,6 +168,7 @@ const bankAccountsHtml = (accounts: BankAccount[], L: (key: string) => string): 
 				[L("email.bank.iban"), account.iban],
 				[L("email.bank.bic"), account.bic],
 				[L("email.bank.country"), account.countryCode],
+				[L("email.bank.reference"), reference ?? ""],
 			].filter(([, value]) => Boolean(value)) as [string, string][]
 
 			const heading = account.label
@@ -166,10 +180,17 @@ const bankAccountsHtml = (accounts: BankAccount[], L: (key: string) => string): 
 		.join("")
 }
 
-export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void> => {
-	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+/**
+ * Line items and money, as one table. Shared by the customer's copy and the
+ * staff notification so the two can never disagree about what was ordered.
+ */
+type OrderSummary = Pick<
+	OrderMailInput,
+	"items" | "subtotal" | "shippingTotal" | "taxTotal" | "grandTotal" | "currency"
+>
 
-	const itemsHtml = rowsTable([
+const orderTableHtml = (input: OrderSummary, L: (key: string) => string): string =>
+	rowsTable([
 		...input.items.map((i) => ({
 			label: `${i.quantity} × ${i.name}`,
 			value: `${i.lineTotal} ${input.currency}`,
@@ -180,28 +201,83 @@ export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void
 		{ label: L("email.total"), value: `${input.grandTotal} ${input.currency}`, strong: true },
 	])
 
+const orderTextLines = (input: OrderSummary, L: (key: string) => string): string[] => [
+	...input.items.map((i) => `${i.quantity} × ${i.name} — ${i.lineTotal} ${input.currency}`),
+	`${L("email.total")}: ${input.grandTotal} ${input.currency}`,
+]
+
+type Translate = (key: string, vars?: Record<string, string | number>) => string
+
+/**
+ * The customer's order confirmation, as HTML and as plain text.
+ *
+ * Separated from the sending so it can be read back in a test without a mail
+ * server, a database or a settings row. This is the message the shop's own
+ * customers receive and the wording is the client's, down to the paragraph
+ * breaks; "does it still say what they asked for" is worth being able to assert
+ * rather than to check by sending one and looking.
+ */
+export const buildOrderConfirmation = (
+	input: OrderMailInput,
+	L: Translate
+): { html: string; textLines: string[] } => {
+	const total = `${input.grandTotal} ${input.currency}`
 	const accounts = input.bankAccounts ?? []
 
+	/*
+	 * The admin's own wording for this payment method, with the order's numbers
+	 * filled in.
+	 *
+	 * "Please transfer {total} quoting {orderNumber}" has to name a figure and a
+	 * reference, and neither is known when the text is written. Without this the
+	 * client's alternatives were a sentence with a gap in it or the same text
+	 * hard-coded here, where changing it means a deploy — and the whole reason
+	 * these instructions live on the payment method is that they should not.
+	 *
+	 * `interpolate` leaves an unknown placeholder visible rather than blanking
+	 * it, so a typo shows up in the preview instead of silently eating a figure.
+	 */
+	const instructions = input.paymentInstructions
+		? interpolate(input.paymentInstructions, { orderNumber: input.orderNumber, total })
+		: null
+
+	const nextStepsHtml = section(
+		L("email.orderPlaced.nextStepsTitle"),
+		bodyText(L("email.orderPlaced.nextSteps"))
+	)
+
+	// A lead-in sentence rather than a heading, because that is what the copy is
+	// — "Im Folgenden finden Sie nochmals die Übersicht Ihrer Bestellung:" reads
+	// as an introduction to the table and looks wrong set as a title above it.
+	const overviewHtml =
+		`<div style="margin:28px 0 0;">${bodyText(L("email.orderPlaced.overview"))}</div>` +
+		orderTableHtml(input, L)
+
 	const paymentHtml =
-		input.paymentInstructions || accounts.length
-			? `<h2 style="margin:28px 0 8px;font-size:16px;">${esc(input.paymentTitle ?? L("email.payment"))}</h2>` +
-				(input.paymentInstructions
-					? `<p style="margin:0;font-size:14px;line-height:1.6;white-space:pre-line;">${esc(input.paymentInstructions)}</p>`
-					: "") +
-				bankAccountsHtml(accounts, L)
+		instructions || accounts.length || input.paymentTitle
+			? section(
+					L("email.orderPlaced.paymentTitle"),
+					(input.paymentTitle
+						? `<p style="margin:0 0 10px;font-size:14px;font-weight:600;">${esc(input.paymentTitle)}</p>`
+						: "") +
+						(instructions ? bodyText(instructions) : "") +
+						bankAccountsHtml(accounts, L, input.orderNumber)
+				)
 			: ""
 
-	await dispatch("order-placed", {
-		to: input.to,
-		locale: input.locale,
-		messages: "email.orderPlaced",
-		vars: { number: input.orderNumber, name: input.customerName, total: `${input.grandTotal} ${input.currency}` },
-		intro: L("email.orderPlaced.intro", { name: input.customerName }),
-		bodyHtml: itemsHtml + paymentHtml,
+	return {
+		html: nextStepsHtml + overviewHtml + paymentHtml,
 		textLines: [
-			...input.items.map((i) => `${i.quantity} × ${i.name} — ${i.lineTotal} ${input.currency}`),
-			`${L("email.total")}: ${input.grandTotal} ${input.currency}`,
-			...(input.paymentInstructions ? ["", input.paymentInstructions] : []),
+			"",
+			L("email.orderPlaced.nextStepsTitle"),
+			L("email.orderPlaced.nextSteps"),
+			"",
+			L("email.orderPlaced.overview"),
+			...orderTextLines(input, L),
+			"",
+			L("email.orderPlaced.paymentTitle"),
+			...(input.paymentTitle ? [input.paymentTitle] : []),
+			...(instructions ? [instructions] : []),
 			// The plain-text part matters here: a mail client with images and
 			// tables blocked still has to be able to show somebody an IBAN.
 			...accounts.flatMap((account) =>
@@ -213,9 +289,29 @@ export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void
 					account.accountNumber ? `${L("email.bank.accountNumber")}: ${account.accountNumber}` : "",
 					account.iban ? `${L("email.bank.iban")}: ${account.iban}` : "",
 					account.bic ? `${L("email.bank.bic")}: ${account.bic}` : "",
+					`${L("email.bank.reference")}: ${input.orderNumber}`,
 				].filter(Boolean)
 			),
 		],
+	}
+}
+
+export const sendOrderConfirmation = async (input: OrderMailInput): Promise<void> => {
+	const L: Translate = (key, vars) => t(key, input.locale, vars)
+	const composed = buildOrderConfirmation(input, L)
+
+	await dispatch("order-placed", {
+		to: input.to,
+		locale: input.locale,
+		messages: "email.orderPlaced",
+		vars: {
+			number: input.orderNumber,
+			name: input.customerName,
+			total: `${input.grandTotal} ${input.currency}`,
+		},
+		intro: L("email.orderPlaced.intro", { name: input.customerName }),
+		bodyHtml: composed.html,
+		textLines: composed.textLines,
 		context: { orderNumber: input.orderNumber },
 	})
 }
@@ -507,6 +603,9 @@ export const notifyStaff = async (input: {
 	 * it from the order, where the download already lives.
 	 */
 	action?: { label: string; url: string }
+	/** Detail under the intro — what was ordered, who by, how they are paying. */
+	bodyHtml?: string
+	textLines?: string[]
 	/**
 	 * Forces the recipient. Only previews and test sends pass this — real
 	 * notifications take the address from the settings, so that a shop which
@@ -528,20 +627,71 @@ export const notifyStaff = async (input: {
 			html: renderLayout({
 				title: prepared.heading ?? input.title,
 				intro: input.intro,
-				bodyHtml: "",
+				bodyHtml: input.bodyHtml ?? "",
 				company,
 				branding: prepared.branding,
 				additionalContent: prepared.additionalContent,
 				...(input.action ? { action: input.action } : {}),
 			}),
-			text: toPlainText(
-				prepared.heading ?? input.title,
-				input.intro,
-				input.action ? ["", input.action.url] : []
-			),
+			text: toPlainText(prepared.heading ?? input.title, input.intro, [
+				...(input.textLines ?? []),
+				...(input.action ? ["", input.action.url] : []),
+			]),
 		},
 		{ kind: input.kind }
 	)
+}
+
+/**
+ * Tells staff an order has been placed.
+ *
+ * Carries the order itself rather than announcing that one exists. The message
+ * used to be a heading and a single line — "Anna Schmidt placed an order for
+ * 306.90 EUR" — which is not enough to do anything with: whoever read it had to
+ * find the dashboard, sign in, search the number and open it before knowing
+ * whether it needed attention today. Most of that is answered by what was
+ * ordered and how it is being paid for, so both are here, and the button
+ * removes the searching.
+ */
+export const notifyStaffOfOrder = async (
+	input: OrderSummary & {
+		locale: LocaleCode
+		orderId: string
+		orderNumber: string
+		customerName: string
+		customerEmail?: string | null
+		paymentTitle?: string | null
+		/** Previews and test sends only — see `notifyStaff`. */
+		to?: string
+	}
+): Promise<void> => {
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+	const total = `${input.grandTotal} ${input.currency}`
+
+	const details = [
+		{ label: L("staff.newOrder.customer"), value: input.customerName },
+		...(input.customerEmail ? [{ label: L("staff.newOrder.email"), value: input.customerEmail }] : []),
+		...(input.paymentTitle ? [{ label: L("email.payment"), value: input.paymentTitle }] : []),
+	]
+
+	await notifyStaff({
+		kind: "staff-new-order",
+		locale: input.locale,
+		subject: L("staff.newOrder.subject", { number: input.orderNumber }),
+		title: L("staff.newOrder.title", { number: input.orderNumber }),
+		intro: L("staff.newOrder.intro", { name: input.customerName, total }),
+		bodyHtml: rowsTable(details) + orderTableHtml(input, L),
+		textLines: [
+			...details.map((d) => `${d.label}: ${d.value}`),
+			"",
+			...orderTextLines(input, L),
+		],
+		action: {
+			label: L("staff.newOrder.action"),
+			url: adminUrl(`/dashboard/orders/${input.orderId}`),
+		},
+		...(input.to ? { to: input.to } : {}),
+	})
 }
 
 /**

@@ -23,6 +23,15 @@ import type { PaymentMethodType } from "@prisma/client"
  * offered here, because a payment nobody can describe is not a payment method.
  */
 
+/**
+ * Placeholders the order confirmation fills in before showing `instructions`.
+ *
+ * `{total}` and `{orderNumber}` only. Written down here because this is where
+ * an admin's text is first authored, and a placeholder that is not on this list
+ * reaches the customer as literal braces rather than a figure.
+ */
+export const INSTRUCTION_PLACEHOLDERS = ["total", "orderNumber"] as const
+
 export interface OfflineMethodDefinition {
 	code: string
 	type: PaymentMethodType
@@ -53,15 +62,17 @@ export const OFFLINE_METHODS: OfflineMethodDefinition[] = [
 				description:
 					"Payment in advance. Available to international customers and first-time buyers from Germany.",
 				instructions:
-					"Your order ships once the payment has arrived. Please quote your order number as the reference.",
+					"You have chosen payment in advance.\nPlease transfer the total of {total} to the following account:",
 			},
 			{
 				locale: "de",
 				title: "Direkte Banküberweisung",
 				description:
 					"Zahlung per Vorkasse. Zahlungsmöglichkeit für Auslandskunden und Erstbesteller aus Deutschland.",
+				// The account itself is not here — it is entered in the dashboard and
+				// rendered under this text, with the order number as the reference.
 				instructions:
-					"Ihre Bestellung wird versandt, sobald die Zahlung eingegangen ist. Bitte geben Sie Ihre Bestellnummer als Verwendungszweck an.",
+					"Sie haben Zahlung per Vorkasse ausgewählt.\nBitte überweisen Sie den Gesamtbetrag in Höhe von {total} auf folgendes Konto:",
 			},
 		],
 	},
@@ -75,13 +86,15 @@ export const OFFLINE_METHODS: OfflineMethodDefinition[] = [
 				locale: "en",
 				title: "Payment by invoice",
 				description: "Pay with an invoice processed through our accounting system.",
-				instructions: "We’ll be in touch shortly to deliver your invoice.",
+				instructions:
+					"You have chosen payment by invoice. The invoice amount is due within 14 days of receiving the goods.",
 			},
 			{
 				locale: "de",
 				title: "Zahlung auf Rechnung",
 				description: "Zahlung per Rechnung über unsere Buchhaltung.",
-				instructions: "Die Rechnung erhalten Sie in Kürze.",
+				instructions:
+					"Sie haben Zahlung auf Rechnung ausgewählt. Der Rechnungsbetrag ist innerhalb von 14 Tagen nach Erhalt der Ware zu begleichen.",
 			},
 		],
 	},
@@ -121,5 +134,20 @@ export const DEFAULT_RULES: Record<string, Record<string, unknown>> = {
 	 * gateway-eligibility logic on that site. Reproduced here so the behaviour
 	 * survives the move; the admin can change it from the screen afterwards.
 	 */
-	invoice: { requiresLogin: true, minCompletedOrders: 1, allowedCountries: ["DE", "AT"] },
+	/*
+	 * Approved resellers from their first order, everyone else from their
+	 * second — the client's rule, and the reason `historyExemptRoles` exists.
+	 * A reseller account is approved by a person before it can trade, so the
+	 * order history it would otherwise have to build is already answered for.
+	 *
+	 * No maximum order value here on purpose. The client has one — invoice up to
+	 * a set amount, larger orders arranged directly — but the figure is theirs
+	 * to set and change from the dashboard, not a number compiled into the shop.
+	 */
+	invoice: {
+		requiresLogin: true,
+		minCompletedOrders: 1,
+		historyExemptRoles: ["RESELLER"],
+		allowedCountries: ["DE", "AT"],
+	},
 }

@@ -3,6 +3,7 @@ import { Prisma, type OrderStatus, type PaymentStatus } from "@prisma/client"
 import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
 import { readBankAccounts } from "../../../domain/payment/bankAccounts"
+import { previousOrdersWhere } from "../../../domain/payment/orderHistory"
 import { SettingService } from "../setting/setting.service"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
@@ -26,6 +27,7 @@ import { loadExternalTiers } from "../product/tierSources"
 import {
 	notifyStaff,
 	notifyStaffOfArtwork,
+	notifyStaffOfOrder,
 	sendCustomerNote,
 	sendOrderConfirmation,
 	sendOrderStatusChanged,
@@ -513,7 +515,7 @@ const quoteCart = async (params: QuoteParams) => {
 	const methods = await prisma.paymentMethod.findMany({ include: { translations: true }, orderBy: { sortOrder: "asc" } })
 
 	const completedOrders = params.userId
-		? await prisma.order.count({ where: { userId: params.userId, status: "COMPLETED" } })
+		? await prisma.order.count({ where: previousOrdersWhere(params.userId) })
 		: 0
 
 	const eligibility = evaluateMethods(
@@ -526,13 +528,26 @@ const quoteCart = async (params: QuoteParams) => {
 			allowedRoles: m.allowedRoles,
 			requiresLogin: m.requiresLogin,
 			minCompletedOrders: m.minCompletedOrders,
+			historyExemptRoles: m.historyExemptRoles,
 			minOrderTotal: m.minOrderTotal?.toString() ?? null,
 			maxOrderTotal: m.maxOrderTotal?.toString() ?? null,
 			requiresValidatedVatId: m.requiresValidatedVatId,
 		})),
 		{
 			isLoggedIn: Boolean(params.userId),
-			role: params.role ?? null,
+			/*
+			 * The effective role, not the stored one.
+			 *
+			 * `role` here is already `effectiveRole(params.role, params.status)` —
+			 * the same value prices are calculated against — and the difference
+			 * matters as soon as a payment method is restricted by role. Every
+			 * B2B registration is approved by hand, so a RESELLER row exists from
+			 * the moment somebody fills in the form; passing the stored role would
+			 * have offered payment by invoice to an account nobody had approved
+			 * yet, which is the precise opposite of what restricting it to
+			 * resellers is for.
+			 */
+			role,
 			billingCountry: params.shippingCountry ?? null,
 			completedOrders,
 			orderTotal: grandTotal,
@@ -593,6 +608,10 @@ const preview = async (params: QuoteParams) => {
 				title: t?.title ?? e.code,
 				description: t?.description ?? null,
 				eligible: e.eligible,
+				// So "above the maximum" can name the maximum. See publicView in
+				// the payment service, which sends the same pair.
+				minOrderTotal: m?.minOrderTotal?.toString() ?? null,
+				maxOrderTotal: m?.maxOrderTotal?.toString() ?? null,
 				...(e.reason ? { reason: e.reason } : {}),
 			}
 		}),
@@ -889,15 +908,19 @@ const place = async (
 		})
 	}
 
-	await notifyStaff({
-		kind: "staff-new-order",
+	await notifyStaffOfOrder({
 		locale: params.locale,
-		subject: t("staff.newOrder.subject", params.locale, { number: result.orderNumber }),
-		title: t("staff.newOrder.title", params.locale, { number: result.orderNumber }),
-		intro: t("staff.newOrder.intro", params.locale, {
-			name: `${params.billingAddress.firstName} ${params.billingAddress.lastName}`,
-			total: `${result.grandTotal} ${result.currency}`,
-		}),
+		orderId: order.id,
+		orderNumber: result.orderNumber,
+		customerName: `${params.billingAddress.firstName} ${params.billingAddress.lastName}`,
+		customerEmail: recipient ?? null,
+		paymentTitle: result.paymentMethod?.title ?? null,
+		subtotal: result.subtotal,
+		shippingTotal: result.shippingTotal,
+		taxTotal: result.taxTotal,
+		grandTotal: result.grandTotal,
+		currency: result.currency,
+		items: result.items.map((i) => ({ name: i.name, quantity: i.quantity, lineTotal: i.lineTotal })),
 	})
 
 	/*

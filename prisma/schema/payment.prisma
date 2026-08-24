@@ -124,9 +124,26 @@ model PaymentMethod {
   /// Requires a signed-in customer.
   requiresLogin Boolean @default(false)
 
-  /// Minimum number of previously completed orders. 0 = no history needed.
+  /// Minimum number of previous orders. 0 = no history needed.
   /// This is how "returning customers only" is expressed.
+  ///
+  /// What counts as a previous order is domain/payment/orderHistory.ts.
   minCompletedOrders Int @default(0)
+
+  /// Roles the order-history requirement above does not apply to.
+  ///
+  /// The client's rule for payment by invoice is two rules wearing one name:
+  /// approved resellers get it from their first order, everyone else from their
+  /// second. `minCompletedOrders` is a single number and cannot say both, and
+  /// splitting invoice into two rows would show a customer two entries called
+  /// "Zahlung auf Rechnung" — one of them greyed out — because the checkout
+  /// lists ineligible methods with their reason rather than hiding them.
+  ///
+  /// Expressed as an exemption rather than a second threshold because that is
+  /// what it is: a reseller account is approved by hand before it can trade, so
+  /// the trust the order history stands in for has already been established by
+  /// a person. Roles here still face every other rule — country, value, VAT.
+  historyExemptRoles UserRole[] @default([])
 
   /// Order-value window this method is offered within.
   minOrderTotal Decimal? @db.Decimal(12, 4)

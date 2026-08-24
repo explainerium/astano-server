@@ -2,12 +2,14 @@ import Decimal from "decimal.js"
 import { Prisma } from "@prisma/client"
 import type { LocaleCode } from "../../../config/locales"
 import { readBankAccounts } from "../../../domain/payment/bankAccounts"
+import { previousOrdersWhere } from "../../../domain/payment/orderHistory"
+import { effectiveRole } from "../../../domain/pricing/effectiveRole"
 import { evaluateMethods } from "../../../domain/payment/gatewayEligibility"
 import { canSellTo, readSellingRule } from "../../../domain/shop/sellingLocations"
 import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocations"
 import { isLow, readStockRules } from "../../../domain/stock/availability"
 import { reservationFor } from "../../../domain/stock/reservation"
-import { notifyStaff, sendOrderConfirmation } from "../../../helpers/mailer"
+import { notifyStaff, notifyStaffOfOrder, sendOrderConfirmation } from "../../../helpers/mailer"
 import { t } from "../../../i18n"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
@@ -154,7 +156,7 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 			where: { id: input.paymentMethodId },
 			include: { translations: true },
 		}),
-		prisma.order.count({ where: { userId: input.userId, status: "COMPLETED" } }),
+		prisma.order.count({ where: previousOrdersWhere(input.userId) }),
 	])
 
 	if (!paymentMethod || !paymentMethod.isActive) {
@@ -220,6 +222,7 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 				allowedRoles: paymentMethod.allowedRoles,
 				requiresLogin: paymentMethod.requiresLogin,
 				minCompletedOrders: paymentMethod.minCompletedOrders,
+				historyExemptRoles: paymentMethod.historyExemptRoles,
 				minOrderTotal: paymentMethod.minOrderTotal?.toString() ?? null,
 				maxOrderTotal: paymentMethod.maxOrderTotal?.toString() ?? null,
 				requiresValidatedVatId: paymentMethod.requiresValidatedVatId,
@@ -227,7 +230,10 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 		],
 		{
 			isLoggedIn: true,
-			role: user?.role ?? null,
+			// Approved or nothing — same rule as checkout and as pricing. A
+			// RESELLER row exists from registration; approval is what makes it mean
+			// anything.
+			role: effectiveRole(user?.role, user?.status),
 			billingCountry: input.billingAddress.countryCode,
 			completedOrders,
 			orderTotal: grandTotal,
@@ -425,15 +431,23 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 		})
 	}
 
-	await notifyStaff({
-		kind: "staff-new-order",
+	await notifyStaffOfOrder({
 		locale: input.locale,
-		subject: t("staff.newOrder.subject", input.locale, { number: orderNumber }),
-		title: t("staff.newOrder.title", input.locale, { number: orderNumber }),
-		intro: t("staff.newOrder.intro", input.locale, {
-			name: `${input.billingAddress.firstName} ${input.billingAddress.lastName}`,
-			total: `${grandTotal.toFixed(2)} ${quote.quotedCurrency}`,
-		}),
+		orderId: order.id,
+		orderNumber,
+		customerName: `${input.billingAddress.firstName} ${input.billingAddress.lastName}`,
+		customerEmail: recipient ?? null,
+		paymentTitle: paymentText?.title ?? paymentMethod.code,
+		subtotal: subtotal.toFixed(2),
+		shippingTotal: shippingCost.toFixed(2),
+		taxTotal: tax.totalTax,
+		grandTotal: grandTotal.toFixed(2),
+		currency: quote.quotedCurrency,
+		items: priced.map((i) => ({
+			name: i.name,
+			quantity: i.quantity,
+			lineTotal: new Decimal(i.quotedLineTotal!.toString()).toFixed(2),
+		})),
 	})
 
 	if (lowStock.length) {

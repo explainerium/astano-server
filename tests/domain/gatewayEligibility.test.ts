@@ -72,6 +72,64 @@ describe("gatewayEligibility", () => {
 			const returning = { ...guest, isLoggedIn: true, completedOrders: 3, billingCountry: "AT" }
 			expect(evaluateMethod(invoice, returning).eligible).toBe(true)
 		})
+
+		/**
+		 * The client's rule as it stands now: approved dealers from their first
+		 * order, everyone else from their second.
+		 *
+		 * The role that reaches here has already been through `effectiveRole`, so
+		 * "RESELLER" means an approved one — an account still waiting on a staff
+		 * decision arrives as GUEST and never reaches this branch. That is the
+		 * whole basis of the exemption: the trust an order history stands in for
+		 * has already been given by a person.
+		 */
+		describe("dealers, exempt from the history", () => {
+			const withExemption = { ...invoice, historyExemptRoles: ["RESELLER"] }
+
+			it("offers it to an approved dealer on their very first order", () => {
+				const dealer = { ...guest, isLoggedIn: true, role: "RESELLER", completedOrders: 0 }
+				expect(evaluateMethod(withExemption, dealer).eligible).toBe(true)
+			})
+
+			it("still makes a retail customer wait for their second order", () => {
+				const retail = { ...guest, isLoggedIn: true, role: "B2C", completedOrders: 0 }
+				expect(evaluateMethod(withExemption, retail).reason).toBe("NOT_ENOUGH_ORDER_HISTORY")
+			})
+
+			/**
+			 * An unapproved dealer reaches this function as a guest, because
+			 * `effectiveRole` prices anything that is not ACTIVE as one. Asserted
+			 * here so the exemption cannot quietly start trusting a stored role.
+			 */
+			it("does not exempt an account that has not been approved", () => {
+				const pending = { ...guest, isLoggedIn: true, role: "GUEST", completedOrders: 0 }
+				expect(evaluateMethod(withExemption, pending).reason).toBe("NOT_ENOUGH_ORDER_HISTORY")
+			})
+
+			it("exempts nobody when the list is empty", () => {
+				const dealer = { ...guest, isLoggedIn: true, role: "RESELLER", completedOrders: 0 }
+				expect(evaluateMethod(invoice, dealer).reason).toBe("NOT_ENOUGH_ORDER_HISTORY")
+			})
+
+			/**
+			 * Exemption is from the history and from nothing else. A dealer over
+			 * the invoice ceiling, or outside DE/AT, is refused like anyone else —
+			 * the client's ceiling exists to bound their credit exposure, and a
+			 * hole in it for the very customers who order most would defeat it.
+			 */
+			it("does not excuse the value ceiling or the country list", () => {
+				const capped = { ...withExemption, maxOrderTotal: "10000" }
+				const dealer = { ...guest, isLoggedIn: true, role: "RESELLER", completedOrders: 0 }
+
+				expect(evaluateMethod(capped, { ...dealer, orderTotal: "10000.01" }).reason).toBe(
+					"ORDER_TOTAL_TOO_HIGH"
+				)
+				expect(evaluateMethod(capped, { ...dealer, billingCountry: "FR" }).reason).toBe(
+					"COUNTRY_NOT_ALLOWED"
+				)
+				expect(evaluateMethod(capped, { ...dealer, orderTotal: "10000" }).eligible).toBe(true)
+			})
+		})
 	})
 
 	it("restricts by role when the admin sets one", () => {
