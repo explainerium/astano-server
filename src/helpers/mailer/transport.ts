@@ -24,6 +24,11 @@ export interface SmtpConfig {
 	port: number
 	user: string
 	pass: string
+	/**
+	 * A password is stored, and this deployment cannot decrypt it. Distinct from
+	 * having none: the fix is the encryption key, not the password.
+	 */
+	unreadablePassword: boolean
 	/** Where the values came from, for the test screen to report honestly. */
 	source: "settings" | "environment"
 }
@@ -53,11 +58,27 @@ const resolveConfig = async (): Promise<SmtpConfig | null> => {
 	}
 
 	if (host) {
+		/*
+		 * A password that is stored but cannot be decrypted is not a missing
+		 * password, and saying so is the difference between a five-minute fix and
+		 * an afternoon.
+		 *
+		 * It happens when the credential was saved under a different
+		 * `CREDENTIALS_KEY` — a developer's laptop and the deployment, most
+		 * often. Left to fall through as an empty string it reaches nodemailer as
+		 * `Missing credentials for "PLAIN"`, which reads as "wrong password" and
+		 * sends whoever is looking to re-type one that was always correct.
+		 */
+		const secret = user
+			? await SettingService.readSecretDetailed("smtp.password")
+			: { value: "", stored: false, readable: true }
+
 		return {
 			host,
 			port: Number.isFinite(port) && port > 0 ? port : 587,
 			user,
-			pass: user ? await SettingService.readSecret("smtp.password") : "",
+			pass: secret.value,
+			unreadablePassword: secret.stored && !secret.readable,
 			source: "settings",
 		}
 	}
@@ -69,6 +90,7 @@ const resolveConfig = async (): Promise<SmtpConfig | null> => {
 		port: env.SMTP_PORT ?? 587,
 		user: env.SMTP_USER ?? "",
 		pass: env.SMTP_PASS ?? "",
+		unreadablePassword: false,
 		source: "environment",
 	}
 }
@@ -294,6 +316,28 @@ export const sendMailNow = async (mail: Mail): Promise<SendResult> => {
 	}
 
 	const where = { source: config.source, host: `${config.host}:${config.port}` }
+
+	/*
+	 * Named before the send is attempted, because the attempt cannot say it.
+	 *
+	 * With no password nodemailer answers `Missing credentials for "PLAIN"`,
+	 * which reads as "the password is wrong". It is not: the password is there
+	 * and correct, and this deployment simply holds a different
+	 * `CREDENTIALS_KEY` than the one that sealed it. That distinction is the
+	 * difference between re-entering it once and re-entering it repeatedly while
+	 * wondering why it never takes.
+	 */
+	if (config.unreadablePassword) {
+		logger.error({ ...where }, "the stored SMTP password cannot be decrypted by this deployment")
+
+		return {
+			ok: false,
+			message:
+				"The saved password cannot be read by this deployment — it was encrypted with a " +
+				"different CREDENTIALS_KEY. Enter the password again here and save.",
+			...where,
+		}
+	}
 
 	try {
 		// One attempt, deliberately. `deliver` retries because nothing is watching

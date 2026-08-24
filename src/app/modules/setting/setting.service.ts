@@ -94,30 +94,52 @@ const getAll = async (opts: { publicOnly?: boolean } = {}) => {
 	)
 }
 
+interface SecretRead {
+	value: string
+	/** Something is stored under this key. */
+	stored: boolean
+	/** It could be decrypted. False means the key that sealed it is not this one. */
+	readable: boolean
+}
+
 /**
- * Decrypts a stored credential for the server's own use.
+ * A stored credential, and enough about it to explain a failure.
  *
- * Returns "" when unset or unreadable, and says so in the log. The callers are
- * mail and payment configuration, where a blank credential produces a clear
- * authentication failure the admin can act on; throwing here would instead take
- * down whatever request happened to be passing.
+ * The three states are genuinely different and were previously all "": never
+ * saved, saved and readable, and saved under a different `CREDENTIALS_KEY`.
+ * The third is the interesting one — it happens whenever a credential is saved
+ * from an environment whose key differs from the one that later reads it, which
+ * on this project meant a developer's laptop and the deployment.
+ *
+ * Collapsed to "", it reaches nodemailer as no password at all and comes back
+ * as `Missing credentials for "PLAIN"` — which reads as "the password is
+ * wrong" and sends whoever is debugging to re-type a password that was never
+ * the problem. Twice.
  */
-const readSecret = async (key: string): Promise<string> => {
+const readSecretDetailed = async (key: string): Promise<SecretRead> => {
 	const row = await prisma.setting.findUnique({ where: { key } })
 	const sealed = asString(row?.value)
 
-	if (!sealed) return ""
+	if (!sealed) return { value: "", stored: false, readable: false }
 
 	try {
-		return open(sealed)
+		return { value: open(sealed), stored: true, readable: true }
 	} catch (error) {
 		logger.error(
 			{ err: error, key },
 			"a stored credential could not be decrypted — CREDENTIALS_KEY may have changed since it was saved"
 		)
-		return ""
+		return { value: "", stored: true, readable: false }
 	}
 }
+
+/**
+ * Decrypts a stored credential for the server's own use.
+ *
+ * Returns "" when unset or unreadable. Callers that can say something useful
+ * about the difference use `readSecretDetailed`.
+ */
+const readSecret = async (key: string): Promise<string> => (await readSecretDetailed(key)).value
 
 /**
  * Every setting as one object, credentials excluded.
@@ -228,6 +250,7 @@ export const SettingService = {
 	getPublic,
 	read,
 	readSecret,
+	readSecretDetailed,
 	isSecretKey,
 	setMany,
 	remove,
