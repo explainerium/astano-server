@@ -149,6 +149,22 @@ model PaymentMethod {
   minOrderTotal Decimal? @db.Decimal(12, 4)
   maxOrderTotal Decimal? @db.Decimal(12, 4)
 
+  /**
+   * Above this value the method is still offered — but conditionally.
+   *
+   * Deliberately not `maxOrderTotal`. The client's rule for large invoice
+   * orders is not "refuse", it is "accept, then review and agree terms, and
+   * normally ask for a deposit" — and a ceiling cannot say that. Set to 10,000
+   * with a ceiling in place, the checkout greyed the option out and a customer
+   * with a €17,000 basket was left with nowhere to go; the shop wanted that
+   * order, and wanted to talk about it.
+   *
+   * Null means no threshold and nothing is ever conditional. The wording shown
+   * when it is crossed is `conditionalNotice` on the translation, so the shop
+   * can say what "conditional" means in their own words.
+   */
+  conditionalAboveTotal Decimal? @db.Decimal(12, 4)
+
   /// Requires a VAT ID that has been validated against VIES.
   requiresValidatedVatId Boolean @default(false)
 
@@ -191,6 +207,18 @@ model PaymentMethodTranslation {
   /// Shown after ordering and repeated in the confirmation email — for a bank
   /// transfer this is where the account details belong.
   instructions String?
+
+  /**
+   * Shown when the order passes `conditionalAboveTotal`.
+   *
+   * At checkout it sits under the method, and it is frozen onto the order with
+   * the instructions, so the confirmation email and the invoice repeat what the
+   * customer agreed to rather than only the screen they agreed on.
+   *
+   * Supports the same {total} and {orderNumber} placeholders as `instructions`,
+   * plus {amount} for the threshold itself.
+   */
+  conditionalNotice String?
 
   @@unique([methodId, locale])
   @@map("payment_method_translations")

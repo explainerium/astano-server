@@ -47,3 +47,22 @@ export const uploadLimiter = make(
 	15 * 60 * 1000,
 	"Too many uploads. Please wait a moment and try again."
 )
+
+/**
+ * The media library, which only staff can reach.
+ *
+ * Sixty per quarter hour was the customer figure applied to a staff-only route,
+ * where it protects nobody — a customer cannot reach this endpoint at all, so
+ * the only person it ever stopped was the shop filling its own library. It
+ * stopped the WordPress import at file sixty-one, and it would stop the client
+ * the first time they select a folder's worth of photographs.
+ *
+ * Still limited rather than unlimited: a runaway script is a real way to spend
+ * a storage bill, and a ceiling nobody reaches by hand is free. Two thousand is
+ * roughly twice the whole of the old shop's media library.
+ */
+export const mediaLibraryLimiter = make(
+	2000,
+	15 * 60 * 1000,
+	"Too many uploads. Please wait a moment and try again."
+)

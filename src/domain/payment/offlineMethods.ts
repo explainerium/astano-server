@@ -44,6 +44,8 @@ export interface OfflineMethodDefinition {
 		title: string
 		description: string
 		instructions: string
+		/** Shown once an order passes the method's review threshold. */
+		conditionalNotice?: string
 	}[]
 }
 
@@ -88,6 +90,10 @@ export const OFFLINE_METHODS: OfflineMethodDefinition[] = [
 				description: "Pay with an invoice processed through our accounting system.",
 				instructions:
 					"You have chosen payment by invoice. The invoice amount is due within 14 days of receiving the goods.",
+				// {amount} is the threshold, so the wording follows the setting
+				// rather than having to be edited alongside it.
+				conditionalNotice:
+					"Your order comes to more than {amount}. Payment by invoice is therefore possible only subject to approval. We will review your order and get in touch with you. For amounts above {amount} we normally ask for a deposit of 35–50%.",
 			},
 			{
 				locale: "de",
@@ -95,6 +101,8 @@ export const OFFLINE_METHODS: OfflineMethodDefinition[] = [
 				description: "Zahlung per Rechnung über unsere Buchhaltung.",
 				instructions:
 					"Sie haben Zahlung auf Rechnung ausgewählt. Der Rechnungsbetrag ist innerhalb von 14 Tagen nach Erhalt der Ware zu begleichen.",
+				conditionalNotice:
+					"Ihre Bestellung hat einen Wert von über {amount}. In diesem Fall ist Zahlung auf Rechnung nur unter Vorbehalt möglich. Wir werden Ihre Bestellung prüfen und uns mit Ihnen in Verbindung setzen. Im Normalfall verlangen wir bei Beträgen über {amount} eine Anzahlung in Höhe von 35–50%.",
 			},
 		],
 	},

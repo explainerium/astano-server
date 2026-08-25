@@ -18,6 +18,8 @@ const translation = z.object({
 	description: z.string().trim().max(2000).optional(),
 	/// Shown after ordering and in the confirmation email. Bank details go here.
 	instructions: z.string().trim().max(4000).optional(),
+	/// Shown once the order passes `conditionalAboveTotal`, and frozen onto it.
+	conditionalNotice: z.string().trim().max(2000).optional(),
 })
 
 const rules = {
@@ -28,6 +30,7 @@ const rules = {
 	historyExemptRoles: z.array(z.enum(["GUEST", "B2C", "RESELLER", "SHOP_MANAGER", "ADMIN"])).default([]),
 	minOrderTotal: decimal.nullable().optional(),
 	maxOrderTotal: decimal.nullable().optional(),
+	conditionalAboveTotal: decimal.nullable().optional(),
 	requiresValidatedVatId: z.boolean().default(false),
 }
 
@@ -56,6 +59,7 @@ export const updateMethodSchema = z.object({
 		historyExemptRoles: z.array(z.enum(["GUEST", "B2C", "RESELLER", "SHOP_MANAGER", "ADMIN"])).optional(),
 		minOrderTotal: decimal.nullable().optional(),
 		maxOrderTotal: decimal.nullable().optional(),
+		conditionalAboveTotal: decimal.nullable().optional(),
 		requiresValidatedVatId: z.boolean().optional(),
 		config: methodConfig,
 		translations: z.array(translation).optional(),

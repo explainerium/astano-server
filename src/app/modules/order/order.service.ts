@@ -32,7 +32,7 @@ import {
 	sendOrderConfirmation,
 	sendOrderStatusChanged,
 } from "../../../helpers/mailer"
-import { t } from "../../../i18n"
+import { interpolate, t } from "../../../i18n"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -531,6 +531,7 @@ const quoteCart = async (params: QuoteParams) => {
 			historyExemptRoles: m.historyExemptRoles,
 			minOrderTotal: m.minOrderTotal?.toString() ?? null,
 			maxOrderTotal: m.maxOrderTotal?.toString() ?? null,
+			conditionalAboveTotal: m.conditionalAboveTotal?.toString() ?? null,
 			requiresValidatedVatId: m.requiresValidatedVatId,
 		})),
 		{
@@ -573,6 +574,9 @@ const quoteCart = async (params: QuoteParams) => {
 		methodsById,
 		user,
 		stockRules,
+		// Already loaded above; returned so `place` does not read them a second
+		// time to answer one question about the currency.
+		settings,
 	}
 }
 
@@ -613,6 +617,16 @@ const preview = async (params: QuoteParams) => {
 				minOrderTotal: m?.minOrderTotal?.toString() ?? null,
 				maxOrderTotal: m?.maxOrderTotal?.toString() ?? null,
 				...(e.reason ? { reason: e.reason } : {}),
+				/*
+				 * Available, with conditions — and what those conditions are.
+				 *
+				 * The wording is sent whenever the method has one rather than only
+				 * when it applies, so the checkout can render it the moment the
+				 * basket crosses the threshold without waiting for another round
+				 * trip. `conditional` is the server's verdict on this order.
+				 */
+				...(e.conditional ? { conditional: true } : {}),
+				conditionalNotice: t?.conditionalNotice ?? null,
 			}
 		}),
 	}
@@ -702,6 +716,29 @@ const place = async (
 	const paymentText = pick(paymentMethod.translations, params.locale)
 	const frozenAccounts = readBankAccounts(paymentMethod.config)
 
+	/*
+	 * The conditions, kept with the instructions rather than beside them.
+	 *
+	 * An order over the review threshold was agreed to on those terms, and the
+	 * customer needs them again in the confirmation email and on the invoice —
+	 * not only on the screen they clicked. Appending here means all three get it
+	 * without a renderer knowing this rule exists: they already print
+	 * `paymentInstructions`, and it is frozen, so changing the wording later
+	 * cannot rewrite what an existing order was told.
+	 */
+	const conditionalNotice = verdict.conditional
+		? interpolate(paymentText?.conditionalNotice?.trim() ?? "", {
+				// Resolved now, not at send time: the text is about to be frozen, and
+				// a threshold the shop later changes must not rewrite what an order
+				// already placed says it was reviewed against.
+				amount: `${Number(paymentMethod.conditionalAboveTotal ?? 0).toFixed(2)} ${String(q.settings.currency ?? "EUR")}`,
+			})
+		: null
+
+	const frozenInstructions =
+		[paymentText?.instructions?.trim(), conditionalNotice || null].filter(Boolean).join("\n\n") ||
+		null
+
 	const order = await prisma.$transaction(async (tx) => {
 		const created = await tx.order.create({
 			data: {
@@ -720,7 +757,7 @@ const place = async (
 				paymentMethodId: paymentMethod.id,
 				paymentMethodCode: paymentMethod.code,
 				paymentMethodTitle: paymentText?.title ?? paymentMethod.code,
-				paymentInstructions: paymentText?.instructions ?? null,
+				paymentInstructions: frozenInstructions,
 				// Copied, not referenced — see Order.paymentAccounts. An empty list
 				// stores as JSON null so a bank-transfer order placed before any
 				// account was entered is distinguishable from one with none.

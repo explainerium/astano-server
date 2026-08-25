@@ -2,7 +2,7 @@ import { Router } from "express"
 import multer from "multer"
 import { MAX_FILE_BYTES } from "./media.constant"
 import { auth } from "../../middlewares/auth"
-import { uploadLimiter } from "../../middlewares/rateLimiter"
+import { mediaLibraryLimiter, uploadLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { MediaController } from "./media.controller"
 import { MediaValidation } from "./media.validation"
@@ -26,10 +26,12 @@ router.get(
 	MediaController.list
 )
 
+// The shop's own library. Staff-only, so the limit here is a runaway backstop
+// rather than a defence — see mediaLibraryLimiter.
 router.post(
 	"/images",
 	auth("ADMIN", "SHOP_MANAGER"),
-	uploadLimiter,
+	mediaLibraryLimiter,
 	upload.single("file"),
 	MediaController.uploadImage
 )

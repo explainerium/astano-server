@@ -145,6 +145,53 @@ describe("gatewayEligibility", () => {
 		expect(evaluateMethod(capped, { ...guest, orderTotal: "500" }).eligible).toBe(true)
 	})
 
+	/**
+	 * Over the threshold the method is still offered — that is the whole point.
+	 *
+	 * The client's first instruction was read as a ceiling, and a customer with
+	 * a €17,000 basket found payment by invoice greyed out with nowhere to go.
+	 * What they actually wanted was to take that order and talk about terms, so
+	 * "conditional" had to be something other than a refusal. If this test ever
+	 * starts asserting `eligible: false`, the bug is back.
+	 */
+	describe("large orders, accepted with conditions", () => {
+		const invoice = { ...open, conditionalAboveTotal: "10000" }
+
+		it("stays available above the threshold, and says so", () => {
+			const verdict = evaluateMethod(invoice, { ...guest, orderTotal: "17493.00" })
+
+			expect(verdict.eligible).toBe(true)
+			expect(verdict.conditional).toBe(true)
+			expect(verdict.reason).toBeUndefined()
+		})
+
+		it("is unconditional at or below the threshold", () => {
+			expect(evaluateMethod(invoice, { ...guest, orderTotal: "10000" }).conditional).toBeUndefined()
+			expect(evaluateMethod(invoice, { ...guest, orderTotal: "9999.99" }).conditional).toBeUndefined()
+		})
+
+		it("marks nothing conditional when no threshold is set", () => {
+			expect(evaluateMethod(open, { ...guest, orderTotal: "999999" }).conditional).toBeUndefined()
+		})
+
+		/**
+		 * A refusal wins. The two thresholds are independent: a shop may still
+		 * cap a method outright, and being "conditional" must not talk it past a
+		 * rule that already said no.
+		 */
+		it("does not rescue a method that failed another rule", () => {
+			const capped = { ...invoice, maxOrderTotal: "20000", allowedCountries: ["DE"] }
+			const verdict = evaluateMethod(capped, {
+				...guest,
+				orderTotal: "17493.00",
+				billingCountry: "FR",
+			})
+
+			expect(verdict.eligible).toBe(false)
+			expect(verdict.conditional).toBeUndefined()
+		})
+	})
+
 	it("can require a validated VAT ID", () => {
 		const vatOnly = { ...open, requiresValidatedVatId: true }
 		expect(evaluateMethod(vatOnly, guest).reason).toBe("REQUIRES_VALIDATED_VAT_ID")

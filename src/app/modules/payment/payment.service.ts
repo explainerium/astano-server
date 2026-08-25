@@ -34,6 +34,7 @@ const adminView = (row: MethodRow, locale: LocaleCode) => ({
 		historyExemptRoles: row.historyExemptRoles,
 		minOrderTotal: row.minOrderTotal?.toString() ?? null,
 		maxOrderTotal: row.maxOrderTotal?.toString() ?? null,
+		conditionalAboveTotal: row.conditionalAboveTotal?.toString() ?? null,
 		requiresValidatedVatId: row.requiresValidatedVatId,
 	},
 	config: row.config,
@@ -68,6 +69,8 @@ const publicView = (row: MethodRow, locale: LocaleCode) => {
 		title: t?.title ?? row.code,
 		description: t?.description ?? null,
 		instructions: t?.instructions ?? null,
+		/** What "conditional" means here, in the shop's words. See the schema. */
+		conditionalNotice: t?.conditionalNotice ?? null,
 		bankAccounts: readBankAccounts(row.config),
 
 		/*
@@ -82,6 +85,7 @@ const publicView = (row: MethodRow, locale: LocaleCode) => {
 		 */
 		minOrderTotal: row.minOrderTotal?.toString() ?? null,
 		maxOrderTotal: row.maxOrderTotal?.toString() ?? null,
+		conditionalAboveTotal: row.conditionalAboveTotal?.toString() ?? null,
 	}
 }
 
@@ -169,6 +173,7 @@ const update = async (id: string, payload: Record<string, unknown>, locale: Loca
 				...(payload.historyExemptRoles !== undefined ? { historyExemptRoles: payload.historyExemptRoles as UserRole[] } : {}),
 				...(payload.minOrderTotal !== undefined ? { minOrderTotal: payload.minOrderTotal != null ? String(payload.minOrderTotal) : null } : {}),
 				...(payload.maxOrderTotal !== undefined ? { maxOrderTotal: payload.maxOrderTotal != null ? String(payload.maxOrderTotal) : null } : {}),
+				...(payload.conditionalAboveTotal !== undefined ? { conditionalAboveTotal: payload.conditionalAboveTotal != null ? String(payload.conditionalAboveTotal) : null } : {}),
 				...(payload.requiresValidatedVatId !== undefined ? { requiresValidatedVatId: payload.requiresValidatedVatId as boolean } : {}),
 				...(payload.config !== undefined ? { config: (payload.config as Prisma.InputJsonValue) ?? Prisma.JsonNull } : {}),
 			},
@@ -179,6 +184,7 @@ const update = async (id: string, payload: Record<string, unknown>, locale: Loca
 			title: string
 			description?: string
 			instructions?: string
+			conditionalNotice?: string
 		}[]) {
 			await tx.paymentMethodTranslation.upsert({
 				where: { methodId_locale: { methodId: id, locale: t.locale } },
@@ -188,11 +194,13 @@ const update = async (id: string, payload: Record<string, unknown>, locale: Loca
 					title: t.title,
 					description: t.description ?? null,
 					instructions: t.instructions ?? null,
+					conditionalNotice: t.conditionalNotice ?? null,
 				},
 				update: {
 					title: t.title,
 					description: t.description ?? null,
 					instructions: t.instructions ?? null,
+					conditionalNotice: t.conditionalNotice ?? null,
 				},
 			})
 		}
@@ -264,6 +272,7 @@ const available = async (
 			historyExemptRoles: r.historyExemptRoles,
 			minOrderTotal: r.minOrderTotal?.toString() ?? null,
 			maxOrderTotal: r.maxOrderTotal?.toString() ?? null,
+			conditionalAboveTotal: r.conditionalAboveTotal?.toString() ?? null,
 			requiresValidatedVatId: r.requiresValidatedVatId,
 		})),
 		{
@@ -292,6 +301,7 @@ const available = async (
 		...publicView(byId.get(v.methodId)!, locale),
 		eligible: v.eligible,
 		...(v.reason ? { reason: v.reason } : {}),
+		...(v.conditional ? { conditional: true } : {}),
 	}))
 }
 

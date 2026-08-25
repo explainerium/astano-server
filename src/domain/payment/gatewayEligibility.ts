@@ -33,6 +33,16 @@ export interface PaymentMethodRules {
 	historyExemptRoles?: string[]
 	minOrderTotal?: Numeric | null
 	maxOrderTotal?: Numeric | null
+	/**
+	 * Above this the method stays available, but the customer is told it comes
+	 * with conditions. Null means nothing is ever conditional.
+	 *
+	 * Distinct from `maxOrderTotal`, which refuses. The two answer different
+	 * questions — "will you take this order at all" and "will you take it on
+	 * these terms" — and the shop's answer to a €17,000 invoice order was yes to
+	 * the first and "let us talk" to the second.
+	 */
+	conditionalAboveTotal?: Numeric | null
 	requiresValidatedVatId: boolean
 }
 
@@ -72,6 +82,16 @@ export interface EligibilityResult {
 	code: string
 	eligible: boolean
 	reason?: IneligibleReason
+	/**
+	 * Available, but not unconditionally — the order is over the method's review
+	 * threshold.
+	 *
+	 * Deliberately separate from `eligible`. A conditional method can still be
+	 * chosen and ordered against; folding it into the refusal would have made
+	 * every caller that checks `eligible` silently start refusing these orders,
+	 * which is the outcome the whole change exists to undo.
+	 */
+	conditional?: boolean
 }
 
 export const evaluateMethod = (
@@ -132,7 +152,19 @@ export const evaluateMethod = (
 		return no("REQUIRES_VALIDATED_VAT_ID")
 	}
 
-	return { methodId: method.id, code: method.code, eligible: true }
+	// Last, and only for a method that has passed everything else: an order
+	// nobody is refusing, on terms the shop wants to agree first.
+	const conditional =
+		method.conditionalAboveTotal !== null &&
+		method.conditionalAboveTotal !== undefined &&
+		total.greaterThan(new Decimal(method.conditionalAboveTotal))
+
+	return {
+		methodId: method.id,
+		code: method.code,
+		eligible: true,
+		...(conditional ? { conditional: true } : {}),
+	}
 }
 
 export const evaluateMethods = (

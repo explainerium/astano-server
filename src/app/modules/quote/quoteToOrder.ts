@@ -10,7 +10,7 @@ import { canShipTo, readShippingRule } from "../../../domain/shop/shippingLocati
 import { isLow, readStockRules } from "../../../domain/stock/availability"
 import { reservationFor } from "../../../domain/stock/reservation"
 import { notifyStaff, notifyStaffOfOrder, sendOrderConfirmation } from "../../../helpers/mailer"
-import { t } from "../../../i18n"
+import { interpolate, t } from "../../../i18n"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import ApiError from "../../errors/ApiError"
@@ -225,6 +225,7 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 				historyExemptRoles: paymentMethod.historyExemptRoles,
 				minOrderTotal: paymentMethod.minOrderTotal?.toString() ?? null,
 				maxOrderTotal: paymentMethod.maxOrderTotal?.toString() ?? null,
+				conditionalAboveTotal: paymentMethod.conditionalAboveTotal?.toString() ?? null,
 				requiresValidatedVatId: paymentMethod.requiresValidatedVatId,
 			},
 		],
@@ -258,6 +259,20 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 	// and the shop's details may change before they do.
 	const frozenAccounts = readBankAccounts(paymentMethod.config)
 
+	// A quoted order is the one most likely to pass the review threshold, so it
+	// carries the same conditions as checkout does. See the note there.
+	const frozenInstructions =
+		[
+			paymentText?.instructions?.trim(),
+			verdict.conditional
+				? interpolate(paymentText?.conditionalNotice?.trim() ?? "", {
+						amount: `${Number(paymentMethod.conditionalAboveTotal ?? 0).toFixed(2)} ${String(settings.currency ?? "EUR")}`,
+					}) || null
+				: null,
+		]
+			.filter(Boolean)
+			.join("\n\n") || null
+
 	/** Filled as stock is decremented, mailed once the order has committed. */
 	const lowStock: { sku: string | null; remaining: number }[] = []
 	const stockRules = readStockRules(settings)
@@ -276,7 +291,7 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 				paymentMethodId: paymentMethod.id,
 				paymentMethodCode: paymentMethod.code,
 				paymentMethodTitle: paymentText?.title ?? paymentMethod.code,
-				paymentInstructions: paymentText?.instructions ?? null,
+				paymentInstructions: frozenInstructions,
 				paymentAccounts: frozenAccounts.length
 					? (frozenAccounts as unknown as Prisma.InputJsonValue)
 					: Prisma.JsonNull,
@@ -426,7 +441,7 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 				lineTotal: new Decimal(i.quotedLineTotal!.toString()).toFixed(2),
 			})),
 			paymentTitle: paymentText?.title ?? paymentMethod.code,
-			paymentInstructions: paymentText?.instructions ?? null,
+			paymentInstructions: frozenInstructions,
 			bankAccounts: frozenAccounts,
 		})
 	}
