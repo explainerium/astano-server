@@ -45,7 +45,7 @@ import sharp from "sharp"
 
 const UPLOADS = "C:/Users/mdrab/Local Sites/astano-v2/app/public/wp-content/uploads"
 const DUMP = "C:/Users/mdrab/Local Sites/astano-v2/app/sql/local.sql"
-const MAP_FILE = path.join(import.meta.dirname, "wp-media-map.json")
+const MAP_FILE = path.join(__dirname, "wp-media-map.json")
 
 const YEARS = ["2025", "2026"]
 const IMAGE = /\.(jpe?g|png|webp|gif|avif|svg)$/i
@@ -288,14 +288,19 @@ const fit = async (buffer: Buffer, ext: string): Promise<Buffer> => {
 		.toBuffer()
 }
 
-/** The paths hard-coded in the storefront's wpMedia helper. */
+/**
+ * The originals the marketing pages are built from.
+ *
+ * Read out of the storefront helper rather than listed here, so the two cannot
+ * drift: whichever photographs those pages use are the ones this brings across.
+ */
 const pageImages = (): Set<string> =>
 	new Set(
 		[
 			...readFileSync(
-				path.join(import.meta.dirname, "../../frontend/src/lib/wpMedia.ts"),
+				path.join(__dirname, "../../frontend/src/lib/pageMedia.ts"),
 				"utf8"
-			).matchAll(/wp\(\s*"([^"]+)"/g),
+			).matchAll(/image\(\s*\n?\s*"([^"]+)"/g),
 		].map((m) => m[1]!.replace("/wp-content/uploads/", ""))
 	)
 

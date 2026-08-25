@@ -8,3 +8,16 @@
 # Tests do not belong in a serverless bundle regardless. They are still run by
 # `npm test`, and still typechecked deliberately: see tsconfig.vercelcheck.json.
 tests/
+
+# One-off maintenance scripts. Same reason as the tests above: Vercel's builder
+# typechecks whatever TypeScript it finds, with its own compiler and its own
+# settings, and it reads neither our tsconfig nor its module mode. The
+# WordPress import uses `import.meta.dirname`, which that compiler rejects
+# outright when it decides the output is CommonJS.
+#
+# The .js files here are deliberately not excluded — `npm run build` calls
+# copy-assets.js and bundle.js.
+#
+# Typechecked deliberately, like the tests: tsconfig.vercelcheck.json.
+scripts/*.ts
+scripts/wp-media-map.json

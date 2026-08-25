@@ -1,6 +1,6 @@
 {
   "//": [
-    "Typechecks src AND tests, which tsconfig.json deliberately does not.",
+    "Typechecks src, tests AND scripts — none of which tsconfig.json covers.",
     "",
     "The main config excludes tests/ so `npm run build` does not try to compile",
     "them into dist/. That left the suite unchecked by any compiler other than",
@@ -13,7 +13,7 @@
     "  npx -p typescript@5.9.3 tsc --noEmit -p tsconfig.vercelcheck.json"
   ],
   "extends": "./tsconfig.json",
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*.ts"],
   "compilerOptions": {
     "rootDir": ".",
     "noEmit": true
