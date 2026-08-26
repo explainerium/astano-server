@@ -26,6 +26,17 @@ export interface StorageDriver {
 
 	put(object: PutObject): Promise<void>
 
+	/**
+	 * The bytes back.
+	 *
+	 * Only the server reads objects this way; a browser is always sent a URL,
+	 * public or signed. This exists for the cases where the file has to travel
+	 * inside something else — a design file attached to the staff notification,
+	 * where a link would be a five-minute signed URL in a message read the next
+	 * morning.
+	 */
+	get(key: string, visibility: Visibility): Promise<Buffer>
+
 	delete(key: string, visibility: Visibility): Promise<void>
 
 	/** Permanent URL for a public object. */

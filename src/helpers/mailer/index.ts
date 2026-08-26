@@ -5,8 +5,17 @@ import type { BankAccount } from "../../domain/payment/bankAccounts"
 import { SettingService } from "../../app/modules/setting/setting.service"
 import { EmailService } from "../../app/modules/email/email.service"
 import type { EmailKind } from "../../app/modules/email/emailRegistry"
+import {
+	fileSize,
+	planAttachments,
+	readAttachments,
+	withUniqueNames,
+	type AttachableFile,
+} from "./attachments"
 import { bodyText, esc, renderLayout, rowsTable, section, toPlainText } from "./layout"
-import { sendMail } from "./transport"
+import { sendMail, type MailAttachment } from "./transport"
+
+export type { AttachableFile } from "./attachments"
 
 export { isConfigured } from "./transport"
 
@@ -463,6 +472,81 @@ export const sendEmailChanged = async (input: {
 	})
 }
 
+/** Everything the enquiry form asks for, as the customer filled it in. */
+export interface QuoteContact {
+	salutation?: string | null
+	firstName?: string | null
+	lastName?: string | null
+	name: string
+	company?: string | null
+	street?: string | null
+	houseNumber?: string | null
+	postcode?: string | null
+	city?: string | null
+	countryCode?: string | null
+	phone?: string | null
+	email: string
+	message?: string | null
+}
+
+/**
+ * The enquiry's contact details, as labelled rows.
+ *
+ * Both mails carry the same block. The client's complaint was that the form
+ * collects a company, an address and a phone number and the email mentioned
+ * none of it — so staff opened the dashboard for every enquiry to find out
+ * where it was from, which is the first thing you need in order to price
+ * anything. The customer gets it too: a confirmation that repeats nothing back
+ * gives them no way to notice they mistyped their own postcode.
+ *
+ * Blank fields are dropped rather than shown empty.
+ */
+const quoteContactHtml = (contact: QuoteContact, L: (key: string) => string): string => {
+	const person = [contact.salutation, contact.firstName, contact.lastName]
+		.filter(Boolean)
+		.join(" ")
+		.trim()
+
+	const street = [contact.street, contact.houseNumber].filter(Boolean).join(" ").trim()
+	const town = [contact.postcode, contact.city].filter(Boolean).join(" ").trim()
+
+	const rows = [
+		[L("email.quote.company"), contact.company],
+		[L("email.quote.contact"), person || contact.name],
+		[L("email.quote.street"), street],
+		[L("email.quote.town"), town],
+		[L("email.quote.country"), contact.countryCode],
+		[L("email.quote.phone"), contact.phone],
+		[L("email.quote.email"), contact.email],
+	].filter(([, value]) => Boolean(value)) as [string, string][]
+
+	return rowsTable(rows.map(([label, value]) => ({ label, value })))
+}
+
+/** The customer's drawings, listed by name and size. */
+const quoteFilesHtml = (files: AttachableFile[]): string =>
+	rowsTable(files.map((f) => ({ label: f.fileName, value: fileSize(f.sizeBytes) })))
+
+const quoteFileLines = (files: AttachableFile[]): string[] =>
+	files.map((f) => `${f.fileName} (${fileSize(f.sizeBytes)})`)
+
+const quoteContactLines = (contact: QuoteContact, L: (key: string) => string): string[] => {
+	const person = [contact.salutation, contact.firstName, contact.lastName]
+		.filter(Boolean)
+		.join(" ")
+		.trim()
+
+	return [
+		contact.company ? `${L("email.quote.company")}: ${contact.company}` : "",
+		`${L("email.quote.contact")}: ${person || contact.name}`,
+		[contact.street, contact.houseNumber].filter(Boolean).join(" ").trim(),
+		[contact.postcode, contact.city].filter(Boolean).join(" ").trim(),
+		contact.countryCode ?? "",
+		contact.phone ? `${L("email.quote.phone")}: ${contact.phone}` : "",
+		`${L("email.quote.email")}: ${contact.email}`,
+	].filter(Boolean)
+}
+
 export const sendQuoteSubmitted = async (input: {
 	to: string
 	locale: LocaleCode
@@ -470,6 +554,15 @@ export const sendQuoteSubmitted = async (input: {
 	contactName: string
 	title: string
 	items: { name: string; quantity: number }[]
+	contact: QuoteContact
+	/**
+	 * Listed, never attached.
+	 *
+	 * The customer sent these; posting them back is bandwidth spent telling
+	 * somebody something they already have. What they cannot see is whether the
+	 * upload arrived, so the names and sizes go in and the bytes do not.
+	 */
+	files?: AttachableFile[]
 	/// Guests reach their thread with this; signed-in customers do not need it.
 	accessToken?: string | null
 }): Promise<void> => {
@@ -479,16 +572,133 @@ export const sendQuoteSubmitted = async (input: {
 		? url(`/quote/${encodeURIComponent(input.accessToken)}`)
 		: url("/account/quotes")
 
+	const message = input.contact.message?.trim()
+	const files = withUniqueNames(input.files ?? [])
+
 	await dispatch("quote-submitted", {
 		to: input.to,
 		locale: input.locale,
 		messages: "email.quoteSubmitted",
 		vars: { number: input.quoteNumber, name: input.contactName, title: input.title },
 		intro: L("email.quoteSubmitted.intro", { name: input.contactName }),
-		bodyHtml: rowsTable(input.items.map((i) => ({ label: i.name, value: String(i.quantity) }))),
+		bodyHtml:
+			section(
+				L("email.quote.itemsTitle"),
+				rowsTable(input.items.map((i) => ({ label: i.name, value: String(i.quantity) })))
+			) +
+			(files.length ? section(L("email.quote.filesTitle"), quoteFilesHtml(files)) : "") +
+			section(L("email.quote.contactTitle"), quoteContactHtml(input.contact, L)) +
+			(message ? section(L("email.quote.messageTitle"), bodyText(message)) : ""),
 		action: { label: L("email.quoteSubmitted.action"), url: link },
-		textLines: [...input.items.map((i) => `${i.quantity} × ${i.name}`), "", link],
+		textLines: [
+			...input.items.map((i) => `${i.quantity} × ${i.name}`),
+			...(files.length ? ["", L("email.quote.filesTitle"), ...quoteFileLines(files)] : []),
+			"",
+			...quoteContactLines(input.contact, L),
+			...(message ? ["", message] : []),
+			"",
+			link,
+		],
 		context: { quoteNumber: input.quoteNumber },
+	})
+}
+
+/**
+ * Tells staff an enquiry has arrived, with enough in it to answer.
+ *
+ * Was a heading and one line — a name and a subject. Everything needed to
+ * quote, which is what was ordered and where it is going, sat in the dashboard
+ * behind a sign-in. Same reasoning as the new-order notification above.
+ */
+export const notifyStaffOfQuote = async (input: {
+	locale: LocaleCode
+	quoteId: string
+	quoteNumber: string
+	title: string
+	items: { name: string; quantity: number }[]
+	contact: QuoteContact
+	/**
+	 * The customer's drawings, attached to this message.
+	 *
+	 * The client asked for exactly this — the enquiry already carried every
+	 * field of the form, and the one thing still behind a sign-in was the file
+	 * the whole enquiry is about. Whoever prices the job now has it open beside
+	 * the quantities.
+	 */
+	files?: AttachableFile[]
+	to?: string
+}): Promise<void> => {
+	const L = (key: string, vars?: Record<string, string | number>) => t(key, input.locale, vars)
+	const message = input.contact.message?.trim()
+
+	const files = withUniqueNames(input.files ?? [])
+	const plan = planAttachments(files)
+
+	/*
+	 * Every file is listed; only what fits is enclosed.
+	 *
+	 * Listing all of them and naming the ones that stayed behind is the honest
+	 * version: a message that silently carried two of three attachments would
+	 * have production cutting from an incomplete set and never knowing there
+	 * was more. The button below already goes to the request, where the rest
+	 * download.
+	 */
+	const filesHtml = files.length
+		? section(
+				L("staff.newQuote.filesTitle"),
+				quoteFilesHtml(files) +
+					(plan.skipped.length
+						? bodyText(
+								L("staff.newQuote.filesTooLarge", {
+									names: plan.skipped.map((f) => f.fileName).join(", "),
+								})
+							)
+						: "")
+			)
+		: ""
+
+	await notifyStaff({
+		kind: "staff-new-quote",
+		locale: input.locale,
+		subject: L("staff.newQuote.subject", { number: input.quoteNumber }),
+		title: L("staff.newQuote.title", { number: input.quoteNumber }),
+		intro: L("staff.newQuote.intro", { name: input.contact.name, title: input.title }),
+		/*
+		 * The staff headings, not the customer's.
+		 *
+		 * The same block reads as "Ihre Angaben" — *your* details — in the
+		 * confirmation, which is right there and wrong here: nobody at the shop
+		 * filled this form in. The rows are identical; only who is being
+		 * addressed changes.
+		 */
+		bodyHtml:
+			section(
+				L("staff.newQuote.itemsTitle"),
+				rowsTable(input.items.map((i) => ({ label: i.name, value: String(i.quantity) })))
+			) +
+			filesHtml +
+			section(L("staff.newQuote.contactTitle"), quoteContactHtml(input.contact, L)) +
+			(message ? section(L("staff.newQuote.messageTitle"), bodyText(message)) : ""),
+		textLines: [
+			...input.items.map((i) => `${i.quantity} × ${i.name}`),
+			...(files.length ? ["", L("staff.newQuote.filesTitle"), ...quoteFileLines(files)] : []),
+			...(plan.skipped.length
+				? [
+						L("staff.newQuote.filesTooLarge", {
+							names: plan.skipped.map((f) => f.fileName).join(", "),
+						}),
+					]
+				: []),
+			"",
+			...quoteContactLines(input.contact, L),
+			...(message ? ["", message] : []),
+		],
+		action: {
+			label: L("staff.newQuote.action"),
+			url: adminUrl(`/dashboard/quotes/${input.quoteId}`),
+		},
+		attachments: readAttachments(plan.attached),
+		...(input.to ? { to: input.to } : {}),
 	})
 }
 
@@ -596,16 +806,27 @@ export const notifyStaff = async (input: {
 	/**
 	 * A button through to the thing that happened.
 	 *
-	 * Always a dashboard link, never the file itself. A signed download URL
+	 * Always a dashboard link, never a link to a file. A signed download URL
 	 * lives five minutes and would be dead before anybody opened the message —
 	 * and lengthening it would put a customer's drawing behind a URL that
-	 * survives every forward of the email it arrived in. Staff sign in and take
-	 * it from the order, where the download already lives.
+	 * survives every forward of the email it arrived in. Where a file should
+	 * travel with the message, it travels as an attachment (below) and not as a
+	 * link to itself.
 	 */
 	action?: { label: string; url: string }
 	/** Detail under the intro — what was ordered, who by, how they are paying. */
 	bodyHtml?: string
 	textLines?: string[]
+	/**
+	 * Files enclosed with the message, read when it is sent.
+	 *
+	 * Staff mail only, and deliberately not on `dispatch`: this is internal
+	 * post between the shop and its own inbox, where the drawing is the work.
+	 * A customer-facing message that attached files would be sending somebody
+	 * their own upload back — and, on any message with more than one recipient
+	 * in its history, sending it somewhere nobody checked.
+	 */
+	attachments?: () => Promise<MailAttachment[]>
 	/**
 	 * Forces the recipient. Only previews and test sends pass this — real
 	 * notifications take the address from the settings, so that a shop which
@@ -637,6 +858,7 @@ export const notifyStaff = async (input: {
 				...(input.textLines ?? []),
 				...(input.action ? ["", input.action.url] : []),
 			]),
+			...(input.attachments ? { attachments: input.attachments } : {}),
 		},
 		{ kind: input.kind }
 	)

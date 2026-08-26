@@ -197,6 +197,11 @@ const sendTest = async (kind: EmailKind, locale: LocaleCode, to: string) => {
 		text: `${notice}
 
 ${mail.text}`,
+		// Carried across from the composed message. The enquiry notification's
+		// whole recent change is that it encloses the customer's drawings, and a
+		// test send that arrived without them would report success on precisely
+		// the thing being tested.
+		...(mail.attachments ? { attachments: mail.attachments } : {}),
 	})
 
 	// Reported, not assumed. The admin asked whether it arrives; "we handed it

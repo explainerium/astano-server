@@ -100,6 +100,18 @@ export const r2Driver: StorageDriver = {
 		)
 	},
 
+	async get(key: string, visibility: Visibility): Promise<Buffer> {
+		const result = await s3().send(
+			new GetObjectCommand({ Bucket: bucketFor(visibility), Key: key })
+		)
+
+		// A 200 with no body is not a thing S3 does, but the type allows it and a
+		// silent empty attachment is worse than a failure that says which key.
+		if (!result.Body) throw new Error(`Storage returned no body for ${key}`)
+
+		return Buffer.from(await result.Body.transformToByteArray())
+	},
+
 	async delete(key: string, visibility: Visibility): Promise<void> {
 		await s3().send(
 			new DeleteObjectCommand({ Bucket: bucketFor(visibility), Key: key })

@@ -209,12 +209,57 @@ const getTransport = async (): Promise<Transporter | null> => {
 	return config ? build(config) : null
 }
 
+export interface MailAttachment {
+	filename: string
+	content: Buffer
+	contentType?: string
+}
+
 export interface Mail {
 	to: string
 	subject: string
 	html: string
 	text: string
 	replyTo?: string
+	/**
+	 * Files to hang off the message, fetched when it is sent rather than when it
+	 * is composed.
+	 *
+	 * A function, not an array, because the bytes live in object storage and
+	 * downloading them is the slowest thing in the whole send. Composed eagerly,
+	 * a customer pressing "send enquiry" would wait for their own drawings to be
+	 * pulled out of Supabase and back again before the page moved — for a
+	 * message they are not the recipient of. Deferred, that download happens
+	 * beside the SMTP handshake, inside the same `waitUntil` that already holds
+	 * the instance open.
+	 *
+	 * Whether anything is attached at all is still decided at compose time, from
+	 * sizes the database already knows, so the body can say what is and is not
+	 * in the envelope.
+	 */
+	attachments?: () => Promise<MailAttachment[]>
+}
+
+/**
+ * The bytes, or none and a log line.
+ *
+ * A storage bucket that will not answer must not cost us the notification: the
+ * message says who enquired, what for, and links to the dashboard where the
+ * files are downloadable regardless. Sending it without the attachments is a
+ * degraded email; throwing here is no email.
+ */
+const resolveAttachments = async (mail: Mail): Promise<MailAttachment[]> => {
+	if (!mail.attachments) return []
+
+	try {
+		return await mail.attachments()
+	} catch (error) {
+		logger.error(
+			{ err: error, to: mail.to, subject: mail.subject },
+			"could not read the attachments — sending the email without them"
+		)
+		return []
+	}
 }
 
 /**
@@ -267,6 +312,8 @@ export const sendMail = (mail: Mail, context: Record<string, unknown> = {}): voi
 			return
 		}
 
+		const attachments = await resolveAttachments(mail)
+
 		await deliver(transport, {
 			from: await resolveFrom(),
 			to: mail.to,
@@ -274,9 +321,13 @@ export const sendMail = (mail: Mail, context: Record<string, unknown> = {}): voi
 			html: mail.html,
 			text: mail.text,
 			replyTo: mail.replyTo,
+			...(attachments.length ? { attachments } : {}),
 		})
 
-		logger.info({ to: mail.to, subject: mail.subject, ...context }, "email sent")
+		logger.info(
+			{ to: mail.to, subject: mail.subject, ...(attachments.length ? { attachments: attachments.length } : {}), ...context },
+			"email sent"
+		)
 	})().catch((error: unknown) =>
 		logger.error({ err: error, to: mail.to, subject: mail.subject, ...context }, "email FAILED")
 	)
@@ -343,12 +394,18 @@ export const sendMailNow = async (mail: Mail): Promise<SendResult> => {
 		// One attempt, deliberately. `deliver` retries because nothing is watching
 		// an order confirmation; here somebody is, and a timeout repeated twice is
 		// the same answer thirty seconds later.
+		// Attachments resolve here too. A test send that quietly dropped them
+		// would be a green tick on the one screen whose job is to prove the real
+		// message works.
+		const attachments = await resolveAttachments(mail)
+
 		await build(config).sendMail({
 			from: await resolveFrom(),
 			to: mail.to,
 			subject: mail.subject,
 			html: mail.html,
 			text: mail.text,
+			...(attachments.length ? { attachments } : {}),
 		})
 
 		logger.info({ to: mail.to, ...where }, "test email sent")

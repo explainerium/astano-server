@@ -17,6 +17,51 @@ import type { EmailKind } from "./emailRegistry"
 
 const CUSTOMER = { name: "Anna", full: "Anna Schmidt" }
 
+/** A filled-in enquiry form, so the preview shows the block that carries it. */
+const SAMPLE_CONTACT = {
+	salutation: "Frau",
+	firstName: "Anna",
+	lastName: "Schmidt",
+	name: CUSTOMER.full,
+	company: "Muster GmbH",
+	street: "Musterstrasse",
+	houseNumber: "12a",
+	postcode: "78661",
+	city: "Dietingen",
+	countryCode: "DE",
+	phone: "+49 741 1748890",
+	email: "anna.schmidt@example.com",
+	message:
+		"Wir bräuchten 250 Stück mit unserem Logo graviert. Liefertermin idealerweise Ende März.",
+}
+
+/**
+ * A real DXF, small enough to write out here: one 100 mm line.
+ *
+ * The enquiry notification's point is that the customer's drawing arrives
+ * attached to it, and a sample that only *named* a file would prove the
+ * heading renders and nothing else — an admin would still not know whether
+ * their mail server passes attachments through, which is the question a test
+ * send exists to answer. This one opens in a CAD program, so the answer is
+ * unambiguous.
+ */
+const SAMPLE_DXF = [
+	"0", "SECTION", "2", "ENTITIES",
+	"0", "LINE", "8", "0",
+	"10", "0.0", "20", "0.0",
+	"11", "100.0", "21", "0.0",
+	"0", "ENDSEC", "0", "EOF", "",
+].join("\r\n")
+
+const SAMPLE_FILES = [
+	{
+		fileName: "logo-outline.dxf",
+		sizeBytes: Buffer.byteLength(SAMPLE_DXF),
+		mimeType: "image/vnd.dxf",
+		read: async () => Buffer.from(SAMPLE_DXF),
+	},
+]
+
 const SAMPLES: Record<EmailKind, (to: string, locale: LocaleCode) => Promise<void>> = {
 	"order-placed": (to, locale) =>
 		mailer.sendOrderConfirmation({
@@ -102,6 +147,8 @@ const SAMPLES: Record<EmailKind, (to: string, locale: LocaleCode) => Promise<voi
 				{ name: "Backblech 60 × 40 cm, gelocht", quantity: 250 },
 				{ name: "Silikonbeschichtung", quantity: 250 },
 			],
+			contact: SAMPLE_CONTACT,
+			files: SAMPLE_FILES,
 			accessToken: "sample-token-not-valid",
 		}),
 
@@ -139,8 +186,21 @@ const SAMPLES: Record<EmailKind, (to: string, locale: LocaleCode) => Promise<voi
 			],
 		}),
 
+	/* Through the real sender: this one carries the enquiry, not just its name. */
 	"staff-new-quote": (to, locale) =>
-		staff(to, locale, "staff-new-quote", "New quote request RFQ-000042", "New quote request RFQ-000042", "Anna Schmidt sent a quote request: Custom trays, 600 × 400"),
+		mailer.notifyStaffOfQuote({
+			to,
+			locale,
+			quoteId: "00000000-0000-0000-0000-000000000000",
+			quoteNumber: "RFQ-000042",
+			title: "Custom trays, 600 × 400",
+			items: [
+				{ name: "Backblech 60 × 40 cm, gelocht", quantity: 250 },
+				{ name: "Silikonbeschichtung", quantity: 250 },
+			],
+			contact: SAMPLE_CONTACT,
+			files: SAMPLE_FILES,
+		}),
 
 	"staff-new-contact": (to, locale) =>
 		staff(to, locale, "staff-new-contact", "Contact form: delivery times", "New enquiry", "Anna Schmidt (anna@example.com) asked: what are your lead times for 500 perforated trays?"),

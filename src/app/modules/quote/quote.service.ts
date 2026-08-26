@@ -4,7 +4,13 @@ import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
 import { planMerge } from "../../../domain/basket/mergePlan"
 import { applyMoqFloor, getEffectiveMoq, isBelowMoq } from "../../../domain/moq/getEffectiveMoq"
 import { t } from "../../../i18n"
-import { notifyStaff, sendQuoteAnswered, sendQuoteSubmitted } from "../../../helpers/mailer"
+import {
+	notifyStaff,
+	notifyStaffOfQuote,
+	sendQuoteAnswered,
+	sendQuoteSubmitted,
+	type AttachableFile,
+} from "../../../helpers/mailer"
 import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
@@ -24,7 +30,24 @@ const basketInclude = {
 		include: {
 			files: {
 				include: {
-					asset: { select: { id: true, originalName: true, sizeBytes: true, createdAt: true } },
+					/*
+					 * `storageKey`, `visibility` and `mimeType` are here for the
+					 * submission email, which encloses the drawings rather than
+					 * linking to them. None of the three ever leaves the server —
+					 * `ArtworkService.toFile` is what the basket view returns, and it
+					 * maps down to an id, a name and a size.
+					 */
+					asset: {
+						select: {
+							id: true,
+							originalName: true,
+							sizeBytes: true,
+							createdAt: true,
+							storageKey: true,
+							visibility: true,
+							mimeType: true,
+						},
+					},
 				},
 				orderBy: { sortOrder: "asc" },
 			},
@@ -450,6 +473,35 @@ const quoteView = (row: QuoteRow, opts: { staff?: boolean } = {}) => ({
  * — because the first line is what the enquiry is usually about and the count
  * is what tells staff how big it is.
  */
+/**
+ * Every drawing on the basket, as something the mailer can enclose.
+ *
+ * Deduplicated by asset. A customer who attaches the same logo to three lines
+ * has sent one file three times, and three identical attachments are three
+ * chances to cut from the wrong copy of the same thing — the lines still list
+ * it individually in the dashboard, where the association is what matters.
+ */
+const attachableFiles = (items: BasketRow["items"]): AttachableFile[] => {
+	const seen = new Set<string>()
+	const files: AttachableFile[] = []
+
+	for (const item of items) {
+		for (const { asset } of item.files) {
+			if (seen.has(asset.id)) continue
+			seen.add(asset.id)
+
+			files.push({
+				fileName: asset.originalName,
+				sizeBytes: asset.sizeBytes,
+				mimeType: asset.mimeType,
+				read: () => storage.get(asset.storageKey, asset.visibility),
+			})
+		}
+	}
+
+	return files
+}
+
 const titleFromBasket = (
 	items: { variant: { product: { translations: { locale: string; name: string }[] }; sku: string | null } }[],
 	locale: LocaleCode
@@ -631,25 +683,66 @@ const submit = async (
 	 * The guest's copy carries the raw access token, which exists nowhere else —
 	 * it is hashed in the database — so this is the only chance to send it.
 	 */
+	/*
+	 * Everything the form asked for, carried into both mails.
+	 *
+	 * The client's complaint: the enquiry form collects a company, an address
+	 * and a phone number and neither mail mentioned any of it, so staff opened
+	 * the dashboard for every enquiry to find out where it was from — which is
+	 * the first thing needed to price anything.
+	 */
+	const contact = {
+		salutation: full!.contactSalutation,
+		firstName: full!.contactFirstName,
+		lastName: full!.contactLastName,
+		name: full!.contactName,
+		company: full!.contactCompany,
+		street: full!.contactStreet,
+		houseNumber: full!.contactHouseNumber,
+		postcode: full!.contactPostcode,
+		city: full!.contactCity,
+		countryCode: full!.contactCountryCode,
+		phone: full!.contactPhone,
+		email: full!.contactEmail,
+		message: full!.message,
+	}
+
+	const items = view.items.map((i) => ({ name: i.name, quantity: i.quantity }))
+
+	/*
+	 * The drawings, ready to travel with the notification.
+	 *
+	 * Taken from the basket rows still in memory rather than re-read from the
+	 * request: the ordering here is the customer's own — line by line, and
+	 * within a line the order they arranged the files in — and the first
+	 * drawing on the first line is the one production opens first.
+	 *
+	 * The bytes are not fetched now. `read` is called on the send path, so a
+	 * customer pressing submit does not wait for their own upload to be pulled
+	 * back out of the bucket for somebody else's inbox.
+	 */
+	const files = attachableFiles(basket.items)
+
 	await sendQuoteSubmitted({
 		to: full!.contactEmail,
 		locale: full!.locale as LocaleCode,
 		quoteNumber: view.quoteNumber,
 		contactName: full!.contactName,
 		title: full!.title,
-		items: view.items.map((i) => ({ name: i.name, quantity: i.quantity })),
+		items,
+		contact,
+		files,
 		accessToken,
 	})
 
-	await notifyStaff({
-		kind: "staff-new-quote",
+	await notifyStaffOfQuote({
 		locale: full!.locale as LocaleCode,
-		subject: t("staff.newQuote.subject", full!.locale as LocaleCode, { number: view.quoteNumber }),
-		title: t("staff.newQuote.title", full!.locale as LocaleCode, { number: view.quoteNumber }),
-		intro: t("staff.newQuote.intro", full!.locale as LocaleCode, {
-			name: full!.contactName,
-			title: full!.title,
-		}),
+		quoteId: full!.id,
+		quoteNumber: view.quoteNumber,
+		title: full!.title,
+		items,
+		contact,
+		files,
 	})
 
 	return { quote: view, accessToken }

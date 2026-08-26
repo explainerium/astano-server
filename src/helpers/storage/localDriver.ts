@@ -37,6 +37,10 @@ export const localDriver: StorageDriver = {
 		await fs.writeFile(full, body)
 	},
 
+	async get(key: string, visibility: Visibility): Promise<Buffer> {
+		return fs.readFile(resolveSafe(key, visibility))
+	},
+
 	async delete(key: string, visibility: Visibility): Promise<void> {
 		try {
 			await fs.unlink(resolveSafe(key, visibility))
