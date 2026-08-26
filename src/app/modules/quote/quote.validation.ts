@@ -26,12 +26,32 @@ export const itemIdSchema = z.object({ params: z.object({ id: z.string().uuid() 
  */
 export const submitSchema = z.object({
 	body: z.object({
-		title: z.string().trim().min(1).max(200),
+		/**
+		 * Composed from the basket when the form does not send one.
+		 *
+		 * The enquiry form used to open with a "Betreff" field, which the client
+		 * asked to remove: a customer who has just filled a basket has already
+		 * said what the enquiry is about, and asking them to summarise it again
+		 * is a required field between them and sending. Staff still need a
+		 * subject line, so the server writes one from what was actually asked
+		 * for — see `titleFromBasket`.
+		 */
+		title: z.string().trim().min(1).max(200).optional(),
 		message: z.string().trim().max(5000).optional(),
 		contactName: z.string().trim().min(1).max(160).optional(),
 		contactEmail: z.string().trim().toLowerCase().email().optional(),
 		contactPhone: z.string().trim().max(50).optional(),
 		contactCompany: z.string().trim().max(200).optional(),
+
+		contactSalutation: z.string().trim().max(40).optional(),
+		contactFirstName: z.string().trim().max(100).optional(),
+		contactLastName: z.string().trim().max(100).optional(),
+
+		contactStreet: z.string().trim().max(200).optional(),
+		contactHouseNumber: z.string().trim().max(30).optional(),
+		contactPostcode: z.string().trim().max(30).optional(),
+		contactCity: z.string().trim().max(120).optional(),
+		contactCountryCode: z.string().trim().toUpperCase().length(2).optional(),
 	}),
 })
 

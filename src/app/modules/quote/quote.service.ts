@@ -9,7 +9,12 @@ import { storage } from "../../../helpers/storage"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
 import { generateToken, hashToken } from "../../../shared/token"
-import { checkArtwork, checkArtworkComplete, readArtworkRules } from "../../../domain/product/artwork"
+import {
+	checkArtwork,
+	checkArtworkComplete,
+	readArtworkRules,
+	readInquiryArtworkRules,
+} from "../../../domain/product/artwork"
 import { ArtworkService } from "../media/artwork.service"
 import ApiError from "../../errors/ApiError"
 import { GUEST_BASKET_TTL_DAYS } from "./quote.constant"
@@ -76,10 +81,10 @@ const basketView = (basket: BasketRow, locale: LocaleCode) => {
 			/// No price is shown. That is the entire point of a quote basket —
 			/// these products have no price until a human sets one.
 			quoteOnly: product.quoteEnabled,
-			artwork: readArtworkRules(product),
+			artwork: readInquiryArtworkRules(product),
 			/// Flagged here, refused at submit — see the gate in submit().
 			artworkMissing:
-				checkArtworkComplete(readArtworkRules(product), i.files.length)?.kind === "REQUIRED",
+				checkArtworkComplete(readInquiryArtworkRules(product), i.files.length)?.kind === "REQUIRED",
 		}
 	})
 
@@ -288,7 +293,7 @@ const addItem = async (
 			},
 		})
 	} else {
-		ArtworkService.refuse(checkArtwork(readArtworkRules(variant.product), assetIds.length))
+		ArtworkService.refuse(checkArtwork(readInquiryArtworkRules(variant.product), assetIds.length))
 		const assets = await ArtworkService.assertOwned(assetIds, owner.userId)
 
 		await prisma.quoteBasketItem.create({
@@ -381,6 +386,21 @@ const quoteView = (row: QuoteRow, opts: { staff?: boolean } = {}) => ({
 		email: row.contactEmail,
 		phone: row.contactPhone,
 		company: row.contactCompany,
+		salutation: row.contactSalutation,
+		firstName: row.contactFirstName,
+		lastName: row.contactLastName,
+		/*
+		 * The address, which staff need in order to price the thing.
+		 *
+		 * Shown to the customer too — it is what they typed, and a thread that
+		 * hides half the enquiry back from the person who sent it reads as if
+		 * something was lost.
+		 */
+		street: row.contactStreet,
+		houseNumber: row.contactHouseNumber,
+		postcode: row.contactPostcode,
+		city: row.contactCity,
+		countryCode: row.contactCountryCode,
 	},
 	expiresAt: row.expiresAt,
 	quotedSubtotal: row.quotedSubtotal?.toFixed(2) ?? null,
@@ -417,15 +437,52 @@ const quoteView = (row: QuoteRow, opts: { staff?: boolean } = {}) => ({
 		})),
 })
 
+/**
+ * A subject line, written from the basket.
+ *
+ * The client had the form open with a "Betreff" box and asked for it to go:
+ * somebody who has just filled a basket has already said what they want, and
+ * being made to summarise it again is a required field standing between them
+ * and sending. Staff still need something readable in a list of forty threads,
+ * so it is composed here instead of demanded there.
+ *
+ * Names the first line and counts the rest — "Backblech 60 × 40 cm +2 weitere"
+ * — because the first line is what the enquiry is usually about and the count
+ * is what tells staff how big it is.
+ */
+const titleFromBasket = (
+	items: { variant: { product: { translations: { locale: string; name: string }[] }; sku: string | null } }[],
+	locale: LocaleCode
+): string => {
+	const first =
+		pick(items[0]!.variant.product.translations, locale)?.name ??
+		items[0]!.variant.sku ??
+		"Anfrage"
+
+	const rest = items.length - 1
+	const title = rest > 0 ? `${first} +${rest}` : first
+
+	// The column takes 200; a product name can be longer than that on its own.
+	return title.length > 200 ? `${title.slice(0, 197)}…` : title
+}
+
 const submit = async (
 	owner: BasketOwner & { user?: { email: string; firstName: string | null; lastName: string | null; company: string | null; phone: string | null } },
 	payload: {
-		title: string
+		title?: string
 		message?: string
 		contactName?: string
 		contactEmail?: string
 		contactPhone?: string
 		contactCompany?: string
+		contactSalutation?: string
+		contactFirstName?: string
+		contactLastName?: string
+		contactStreet?: string
+		contactHouseNumber?: string
+		contactPostcode?: string
+		contactCity?: string
+		contactCountryCode?: string
 	},
 	locale: LocaleCode
 ) => {
@@ -461,7 +518,7 @@ const submit = async (
 		// A quote for a shape nobody has seen cannot be priced. Checked here
 		// rather than in the form because a basket may sit half-specified.
 		const artwork = checkArtworkComplete(
-			readArtworkRules(item.variant.product),
+			readInquiryArtworkRules(item.variant.product),
 			item.files.length
 		)
 		if (artwork) {
@@ -469,9 +526,23 @@ const submit = async (
 		}
 	}
 
+	/*
+	 * One name, composed rather than typed.
+	 *
+	 * The form asks for a first and last name separately, which is what a
+	 * delivery label needs — but every reader of a quote wants the whole name:
+	 * the greeting in the confirmation, the staff list, the thread header. So
+	 * the parts are stored and the whole is stored with them, and nothing
+	 * downstream has to know the form was split.
+	 *
+	 * Falls back to `contactName` for anything still sending the old shape, and
+	 * to the account for a signed-in customer who sent neither.
+	 */
 	const contactName =
-		payload.contactName ??
+		[payload.contactFirstName, payload.contactLastName].filter(Boolean).join(" ").trim() ||
+		payload.contactName ||
 		[owner.user?.firstName, owner.user?.lastName].filter(Boolean).join(" ").trim()
+
 	const contactEmail = payload.contactEmail ?? owner.user?.email
 
 	// Guests must supply contact details — there is no account to fall back on,
@@ -495,8 +566,17 @@ const submit = async (
 				contactPhone: payload.contactPhone ?? owner.user?.phone ?? null,
 				contactCompany: payload.contactCompany ?? owner.user?.company ?? null,
 				accessTokenHash: accessToken ? hashToken(accessToken) : null,
-				title: payload.title,
+				title: payload.title?.trim() || titleFromBasket(basket.items, locale),
 				message: payload.message ?? null,
+
+				contactSalutation: payload.contactSalutation ?? null,
+				contactFirstName: payload.contactFirstName ?? owner.user?.firstName ?? null,
+				contactLastName: payload.contactLastName ?? owner.user?.lastName ?? null,
+				contactStreet: payload.contactStreet ?? null,
+				contactHouseNumber: payload.contactHouseNumber ?? null,
+				contactPostcode: payload.contactPostcode ?? null,
+				contactCity: payload.contactCity ?? null,
+				contactCountryCode: payload.contactCountryCode ?? null,
 				locale,
 				items: {
 					create: basket.items.map((item) => ({

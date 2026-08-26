@@ -100,10 +100,40 @@ model QuoteRequest {
 
   /// Contact details, captured for guests and copied for signed-in customers so
   /// the request stays readable if the account is later deleted.
+  ///
+  /// `contactName` is the whole name as one string and stays the field
+  /// everything reads — emails, the staff list, the thread header. It is
+  /// composed from the two below rather than typed, so a request submitted
+  /// before the form was split still reads correctly.
   contactName    String
   contactEmail   String
   contactPhone   String?
   contactCompany String?
+
+  /// Herr · Frau · Divers, as the client's form offers them. Free text rather
+  /// than an enum: a salutation is a courtesy, and a shop that wants to add one
+  /// should not need a migration to do it.
+  contactSalutation String?
+  contactFirstName  String?
+  contactLastName   String?
+
+  /**
+   * Where the enquiry comes from.
+   *
+   * Asked for because a quote is a commercial offer: what it costs to make and
+   * ship a thousand cutters depends on where they are going, and the client was
+   * answering that question by email before the form ever collected it.
+   *
+   * House number is its own field at the client's request — German addresses
+   * are read that way, and a delivery note that splits them is easier to
+   * transcribe than one that does not.
+   */
+  contactStreet      String?
+  contactHouseNumber String?
+  contactPostcode    String?
+  contactCity        String?
+  /// ISO 3166-1 alpha-2.
+  contactCountryCode String?
 
   /// Lets a guest follow their own request from an emailed link. Stored
   /// hashed — the raw value only ever exists in that email.

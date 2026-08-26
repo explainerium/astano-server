@@ -40,6 +40,33 @@ export const readArtworkRules = (product: ArtworkProduct | null | undefined): Ar
 
 export const acceptsArtwork = (rules: ArtworkRules): boolean => rules.maxFiles > 0
 
+/** What an enquiry line takes when the product itself asks for no artwork. */
+export const INQUIRY_ARTWORK_FALLBACK = 6
+
+/**
+ * What an *enquiry* line may carry, which is a different question.
+ *
+ * `artworkMaxFiles` says whether a product is made to a drawing — a fact about
+ * manufacturing, set per product. An enquiry is a question, and the answer very
+ * often depends on a sketch, a photograph of the thing being copied, or a logo,
+ * for products that are never otherwise made to order.
+ *
+ * The client asked for the upload to be available on the enquiry basket and
+ * found it available nowhere. It was not a bug in the form: every product in
+ * the shop has `artworkMaxFiles` at 0, so there was no line anywhere that would
+ * take a file. Asking them to go and set a number on each of fifty products
+ * before they can be sent a drawing is the wrong way round.
+ *
+ * So an enquiry line takes the product's allowance where the shop has set one,
+ * and this otherwise. `required` still comes from the product alone — needing a
+ * drawing before a quote can be given is a fact about the product, and nothing
+ * here should start demanding one.
+ */
+export const readInquiryArtworkRules = (product: ArtworkProduct | null | undefined): ArtworkRules => {
+	const rules = readArtworkRules(product)
+	return acceptsArtwork(rules) ? rules : { maxFiles: INQUIRY_ARTWORK_FALLBACK, required: false }
+}
+
 export type ArtworkProblem =
 	| { kind: "NOT_ACCEPTED" }
 	| { kind: "TOO_MANY"; max: number }

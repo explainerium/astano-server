@@ -5,6 +5,8 @@ import {
 	checkArtworkComplete,
 	NO_ARTWORK,
 	readArtworkRules,
+	readInquiryArtworkRules,
+	INQUIRY_ARTWORK_FALLBACK,
 } from "../../src/domain/product/artwork"
 
 /**
@@ -83,5 +85,43 @@ describe("artwork rules", () => {
 		it("says nothing about a product that does not take artwork", () => {
 			expect(checkArtworkComplete(NO_ARTWORK, 0)).toBeNull()
 		})
+	})
+})
+
+/**
+ * An enquiry is a question, and the answer usually depends on a picture.
+ *
+ * The shop's own catalogue is the reason this exists: every product in it has
+ * `artworkMaxFiles` at 0, so the enquiry basket would take a drawing from
+ * nobody — the client reported the upload as missing and it was, everywhere.
+ */
+describe("readInquiryArtworkRules", () => {
+	it("lets an enquiry carry files for a product that asks for none", () => {
+		const rules = readInquiryArtworkRules({ artworkMaxFiles: 0, artworkRequired: false })
+
+		expect(rules.maxFiles).toBe(INQUIRY_ARTWORK_FALLBACK)
+		expect(rules.required).toBe(false)
+	})
+
+	it("does the same when the product says nothing at all", () => {
+		expect(readInquiryArtworkRules(null).maxFiles).toBe(INQUIRY_ARTWORK_FALLBACK)
+		expect(readInquiryArtworkRules(undefined).maxFiles).toBe(INQUIRY_ARTWORK_FALLBACK)
+	})
+
+	/**
+	 * A product the shop has configured keeps its own answer. The fallback is
+	 * for the silent case only — it must never widen a limit somebody set.
+	 */
+	it("defers to the product's own allowance where there is one", () => {
+		const rules = readInquiryArtworkRules({ artworkMaxFiles: 2, artworkRequired: true })
+
+		expect(rules.maxFiles).toBe(2)
+		expect(rules.required).toBe(true)
+	})
+
+	it("never starts requiring a drawing the product did not require", () => {
+		expect(readInquiryArtworkRules({ artworkMaxFiles: 0, artworkRequired: true }).required).toBe(
+			false
+		)
 	})
 })
