@@ -71,6 +71,8 @@ model Asset {
   categoryImageFor Category[]       @relation("CategoryImage")
   categoryIconFor  Category[]       @relation("CategoryIcon")
   variantImageFor  ProductVariant[] @relation("VariantImage")
+  /// Marketing pictures the shop has swapped from the dashboard. See content.prisma.
+  contentImageFor  ContentMedia[]   @relation("ContentImage")
 
   cartLines       CartItemFile[]
   quoteBasketLines QuoteBasketItemFile[]

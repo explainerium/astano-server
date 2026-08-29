@@ -2,6 +2,7 @@ import { Router } from "express"
 import { AccountRoutes } from "../modules/account/account.routes"
 import { AdminB2bRoutes, B2bRoutes } from "../modules/b2bApplication/b2bApplication.routes"
 import { AdminContactRoutes, ContactRoutes } from "../modules/contact/contact.routes"
+import { ContentRoutes } from "../modules/content/content.routes"
 import { AdminNewsletterRoutes, NewsletterRoutes } from "../modules/newsletter/newsletter.routes"
 import { WishlistRoutes } from "../modules/wishlist/wishlist.routes"
 import { AdminAttributeRoutes, AttributeRoutes } from "../modules/attribute/attribute.routes"
@@ -51,6 +52,7 @@ const moduleRoutes: ModuleRoute[] = [
 	// signed-in administrator. See CronJobRoutes.
 	{ path: "/cron", route: CronJobRoutes },
 	{ path: "/settings", route: SettingRoutes },
+	{ path: "/content", route: ContentRoutes },
 	{ path: "/admin/emails", route: EmailRoutes },
 	{ path: "/categories", route: CategoryRoutes },
 	{ path: "/admin/categories", route: AdminCategoryRoutes },

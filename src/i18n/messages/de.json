@@ -371,5 +371,8 @@
 	"email.sampleTag": "Beispiel",
 	"email.sampleNotice": "Dies ist eine Beispielnachricht aus der Shop-Verwaltung, um das Aussehen der E-Mails zu prüfen. Es ist keine echte Nachricht — enthaltene Links oder Codes sind Platzhalter und funktionieren nicht.",
 	"email.sendFailed": "Der Mailserver hat die Nachricht abgelehnt.",
-	"error.transactionTimeout": "Das Speichern hat zu lange gedauert und wurde zurückgenommen. Bitte versuchen Sie es erneut."
+	"error.transactionTimeout": "Das Speichern hat zu lange gedauert und wurde zurückgenommen. Bitte versuchen Sie es erneut.",
+	"content.saved": "Inhalt gespeichert",
+	"content.notEditable": "Das kann über diesen Bildschirm nicht geändert werden",
+	"content.missingVariable": "Der Text muss {vars} weiterhin enthalten"
 }

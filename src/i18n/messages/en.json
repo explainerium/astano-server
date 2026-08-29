@@ -371,5 +371,8 @@
 	"email.sampleTag": "Sample",
 	"email.sampleNotice": "This is a sample sent from the shop admin to check how emails look. It is not a real message — any link or code in it is placeholder data and will not work.",
 	"email.sendFailed": "The mail server refused the message.",
-	"error.transactionTimeout": "That save took too long and was rolled back. Please try again."
+	"error.transactionTimeout": "That save took too long and was rolled back. Please try again.",
+	"content.saved": "Content saved",
+	"content.notEditable": "That is not something this screen may change",
+	"content.missingVariable": "The text must still contain {vars}"
 }

@@ -141,6 +141,12 @@ model User {
   /// Quantity ladders negotiated with this customer.
   priceTiers CustomerPriceTier[]
 
+  /// Page content this account last edited. Editing is ADMIN-only, so these are
+  /// empty on every other role. See content.prisma.
+  contentEntriesEdited ContentEntry[] @relation("ContentEntryEditor")
+  contentMediaEdited   ContentMedia[] @relation("ContentMediaEditor")
+  pagesEdited          Page[]         @relation("PageEditor")
+
   @@index([role, status])
   @@index([deletedAt])
   @@map("users")
