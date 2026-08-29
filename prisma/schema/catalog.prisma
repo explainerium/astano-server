@@ -128,6 +128,19 @@ model Product {
   /// Manual ordering within a category listing (WooCommerce "menu order").
   sortOrder Int @default(0)
 
+  /// Whether this product leads the home page — WooCommerce's Featured star.
+  ///
+  /// Not called `featured`, deliberately: `featuredAsset` a few lines down is
+  /// the product's main *image*, and two different "featured"s in one model is
+  /// how somebody ends up ticking the wrong one. The shop calls these its top
+  /// products, so that is what this is called.
+  ///
+  /// Which products lead, and the order they lead in, are two separate
+  /// decisions — this is only the first. `sortOrder` above arranges the set
+  /// this chooses. That is the pair WooCommerce offered and the pair the shop
+  /// asked to have back.
+  isTopProduct Boolean @default(false)
+
   /// "Preis auf Anfrage". When true the price is hidden, add-to-cart is
   /// blocked, and the product is orderable only through the quote basket (R2).
   quoteEnabled Boolean @default(false)
@@ -199,6 +212,9 @@ model Product {
   @@index([status, kind])
   @@index([visibility, status])
   @@index([quoteEnabled])
+  // The home page runs this filter on every visit, which is more often than
+  // anything else in the catalogue is asked for.
+  @@index([isTopProduct])
   // Not for querying — nothing lists products by author. It is what stops
   // deleting a staff account from sequentially scanning the whole catalogue to
   // apply the SetNull.

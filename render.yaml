@@ -48,6 +48,18 @@ services:
       - key: DATABASE_URL
         sync: false
 
+      # Set this whenever DATABASE_URL above is a *transaction* pooler — a
+      # Supabase :6543 / `pgbouncer=true` string, or PgBouncer in transaction
+      # mode. That kind of connection keeps no session state, so the advisory
+      # lock `prisma migrate deploy` takes is never granted, so the buildCommand
+      # above hangs on it rather than failing: no error to read, just a deploy
+      # that never finishes. Point it at a session-holding connection —
+      # for Supabase, the same host and credentials on port 5432.
+      #
+      # Leave it unset on a direct connection, which is what Neon hands you.
+      - key: DIRECT_URL
+        sync: false
+
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET

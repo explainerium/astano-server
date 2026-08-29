@@ -22,6 +22,7 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 		page?: number
 		limit?: number
 		sort?: string
+		top?: string
 	}
 
 	const result = await ProductService.list({
@@ -37,6 +38,9 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 		page: Number(q.page ?? 1),
 		limit: Number(q.limit ?? 24),
 		sort: q.sort ?? "default",
+		// A string on the way in, like every other query parameter here: the
+		// validator narrows what may arrive but hands the query back untouched.
+		top: q.top === "true",
 	})
 
 	sendResponse(res, {

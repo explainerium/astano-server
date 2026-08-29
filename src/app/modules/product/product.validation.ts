@@ -207,6 +207,7 @@ const productBody = z.object({
 	taxStatus: z.enum(["TAXABLE", "SHIPPING_ONLY", "NONE"]).default("TAXABLE"),
 	moq: z.number().int().min(0).default(0),
 	sortOrder: z.number().int().default(0),
+	isTopProduct: z.boolean().default(false),
 	featuredAssetId: z.string().uuid().nullable().optional(),
 	categoryIds: z.array(z.string().uuid()).default([]),
 	assetIds: z.array(z.string().uuid()).default([]),
@@ -249,6 +250,7 @@ export const updateProductSchema = z.object({
 		taxStatus: z.enum(["TAXABLE", "SHIPPING_ONLY", "NONE"]).optional(),
 		moq: z.number().int().min(0).optional(),
 		sortOrder: z.number().int().optional(),
+		isTopProduct: z.boolean().optional(),
 		taxClassId: z.string().uuid().nullable().optional(),
 		featuredAssetId: z.string().uuid().nullable().optional(),
 		categoryIds: z.array(z.string().uuid()).optional(),
@@ -278,6 +280,19 @@ export const listProductsSchema = z.object({
 		page: z.coerce.number().int().min(1).default(1),
 		limit: z.coerce.number().int().min(1).max(100).default(24),
 		sort: z.enum(["default", "newest", "name", "price_asc", "price_desc"]).default("default"),
+		/**
+		 * Narrows the list to what the shop marked as a top product.
+		 *
+		 * The two words, not `z.coerce.boolean()`: coercion follows JavaScript
+		 * truthiness, so the string "false" would arrive as `true` and a caller
+		 * switching the filter off would silently switch it on.
+		 *
+		 * A guard and nothing more — `validateRequest` writes back only
+		 * `req.body`, so what reaches the controller is still the string. This
+		 * decides which strings are allowed through; the controller reads it.
+		 * Absent and "false" mean the same thing, which is: do not filter.
+		 */
+		top: z.enum(["true", "false"]).optional(),
 	}),
 })
 

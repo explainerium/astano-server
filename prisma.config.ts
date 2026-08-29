@@ -2,7 +2,20 @@ import "dotenv/config"
 import { defineConfig } from "prisma/config"
 
 /**
- * The connection string, if there is one — read straight from the environment.
+ * The connection string Migrate should use, if there is one.
+ *
+ * `DIRECT_URL` first, and this is not a preference. The app connects through
+ * Supabase's *transaction* pooler — port 6543, `pgbouncer=true` — which hands
+ * out a different backend connection per statement and keeps no session state.
+ * Migrate needs session state: before touching anything it takes a
+ * session-level advisory lock, so that two deploys cannot migrate the same
+ * database at once. Over the transaction pooler that lock is never granted and
+ * the command does not fail, it waits — `prisma migrate status` sat silent for
+ * four minutes and had to be killed. On the *session* pooler, port 5432 on the
+ * same host, the lock is granted and Migrate behaves.
+ *
+ * `DATABASE_URL` stays the fallback, so a plain local Postgres — where the two
+ * are one connection — needs nothing extra.
  *
  * Deliberately **not** Prisma's own `env("DATABASE_URL")` helper. That one
  * throws while the config file is being loaded, which means every Prisma
@@ -18,7 +31,7 @@ import { defineConfig } from "prisma/config"
  * Migrate genuinely does need it, and still gets it — or Prisma's own "no
  * datasource url" error, which says so plainly.
  */
-const url = process.env.DATABASE_URL
+const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL
 
 export default defineConfig({
 	// A folder, not a file — Prisma 7 merges every .prisma inside it. The

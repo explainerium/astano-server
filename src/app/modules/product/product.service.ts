@@ -500,6 +500,7 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 		taxStatus: row.taxStatus,
 		moq: row.moq,
 		sortOrder: row.sortOrder,
+		isTopProduct: row.isTopProduct,
 		name: t?.name ?? "(untitled)",
 		slug: t?.slug ?? row.id,
 		translations: row.translations,
@@ -609,6 +610,8 @@ const list = async (params: {
 	page: number
 	limit: number
 	sort: string
+	/// Only what the shop marked as a top product. The home page's whole query.
+	top?: boolean
 }) => {
 	// A search request and a browse request respect different visibility rules,
 	// exactly as WooCommerce does.
@@ -617,6 +620,7 @@ const list = async (params: {
 	const where: Prisma.ProductWhereInput = {
 		status: "PUBLISHED",
 		visibility: { in: [...visibility] },
+		...(params.top ? { isTopProduct: true } : {}),
 		...(params.category
 			? { categories: { some: { category: { translations: { some: { slug: params.category } }, isHidden: false } } } }
 			: {}),
@@ -634,12 +638,25 @@ const list = async (params: {
 			: {}),
 	}
 
-	const orderBy: Prisma.ProductOrderByWithRelationInput =
-		params.sort === "newest"
-			? { createdAt: "desc" }
-			: params.sort === "name"
-				? { translations: { _count: "desc" } }
-				: { sortOrder: "asc" }
+	/**
+	 * A list, so that equal sort orders still come out in a fixed order.
+	 *
+	 * Every product ships with `sortOrder` 0, and a single-key ORDER BY over a
+	 * column where every row ties leaves the rest to Postgres, which is entitled
+	 * to answer differently between two runs of the same query. That was
+	 * survivable while this only fed the catalogue listing; it is not now that
+	 * the same order arranges the home page's strip, where a customer would have
+	 * no way to read a reshuffle as anything but the shop being broken.
+	 *
+	 * Newest-first is the second key because it is the order the admin list
+	 * already treats as a catalogue's natural one.
+	 *
+	 * `name` is not here. A product's name lives in its translation row, one per
+	 * language, so there is no column on `products` to order by — it is decided
+	 * in memory below, exactly as price is.
+	 */
+	const orderBy: Prisma.ProductOrderByWithRelationInput[] =
+		params.sort === "newest" ? [{ createdAt: "desc" }] : [{ sortOrder: "asc" }, { createdAt: "desc" }]
 
 	/**
 	 * Price is not a column, so filtering or sorting by it cannot be a query.
@@ -662,11 +679,29 @@ const list = async (params: {
 		params.minPrice !== undefined ||
 		params.maxPrice !== undefined
 
+	/**
+	 * The name is not a column either, and for the same shape of reason.
+	 *
+	 * It lives in `product_translations`, one row per language, so ordering the
+	 * parent by it is not something Prisma can express. What this used to do
+	 * instead was order by `translations._count` — the *number* of translation
+	 * rows a product has, which measures how completely it has been translated
+	 * and says nothing whatever about its name. A customer picking "Name" from
+	 * the sort box got an order no reading of the word explains, and no error.
+	 *
+	 * So it joins price on the in-memory path, and sorts by the name this
+	 * visitor is actually shown rather than by any one language's.
+	 */
+	const byName = params.sort === "name"
+
+	/** Either reason to decide the order here instead of in the query. */
+	const inMemory = byPrice || byName
+
 	const rows = await prisma.product.findMany({
 		where,
 		include: detailInclude,
 		orderBy,
-		...(byPrice ? {} : { skip: (params.page - 1) * params.limit, take: params.limit }),
+		...(inMemory ? {} : { skip: (params.page - 1) * params.limit, take: params.limit }),
 	})
 
 	const [externalTiers, stockRules] = await Promise.all([
@@ -682,7 +717,13 @@ const list = async (params: {
 		toPublicProduct(r, params.locale, params.role, params.quantity, externalTiers(r.id), stockRules)
 	)
 
-	if (!byPrice) {
+	// The same comparison the admin list makes, against the same resolved name:
+	// the visitor's own locale decides how ä and z fall against each other.
+	if (byName) {
+		priced.sort((a, b) => a.name.localeCompare(b.name, params.locale))
+	}
+
+	if (!inMemory) {
 		const total = await prisma.product.count({ where })
 		return {
 			data: priced,
@@ -1112,6 +1153,7 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 			taxStatus: payload.taxStatus,
 			moq: payload.moq,
 			sortOrder: payload.sortOrder,
+			isTopProduct: payload.isTopProduct,
 			featuredAssetId: payload.featuredAssetId ?? null,
 			translations: { create: translations },
 			tabs: {
@@ -1229,6 +1271,10 @@ const duplicate = async (id: string, locale: LocaleCode, createdById?: string) =
 			taxStatus: row.taxStatus,
 			moq: row.moq,
 			sortOrder: row.sortOrder,
+			// Carried over like everything else. The copy is a draft, and a draft
+			// is not published, so a ticked box on one cannot reach the home page
+			// before somebody has looked at it.
+			isTopProduct: row.isTopProduct,
 			featuredAssetId: row.featuredAssetId,
 			categoryIds: row.categories.map((c) => c.categoryId),
 			assetIds: row.assets.map((a) => a.assetId),
@@ -1325,6 +1371,7 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 				...(payload.taxStatus !== undefined ? { taxStatus: payload.taxStatus } : {}),
 				...(payload.moq !== undefined ? { moq: payload.moq } : {}),
 				...(payload.sortOrder !== undefined ? { sortOrder: payload.sortOrder } : {}),
+				...(payload.isTopProduct !== undefined ? { isTopProduct: payload.isTopProduct } : {}),
 				...(payload.featuredAssetId !== undefined
 					? { featuredAssetId: payload.featuredAssetId }
 					: {}),
