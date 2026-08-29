@@ -21,6 +21,23 @@ router.get(
 )
 
 /**
+ * One long document — Impressum, Datenschutz, AGB.
+ *
+ * Separate from /public, and read only by the three pages that show one. The
+ * German privacy policy alone is about ten thousand words; folding it into the
+ * payload every page render merges would charge every page on the site for a
+ * document three of them display.
+ *
+ * Declared before the guard, like /public, so a signed-out visitor can read the
+ * terms they are agreeing to.
+ */
+router.get(
+	"/pages/:slug",
+	validateRequest(ContentValidation.readPageSchema),
+	ContentController.readPage
+)
+
+/**
  * Editing is ADMIN's, and not SHOP_MANAGER's.
  *
  * Both roles reach /admin, so this is narrower than the dashboard around it —
@@ -36,6 +53,15 @@ router.use(auth("ADMIN"))
 
 router.get("/", ContentController.list)
 router.put("/", validateRequest(ContentValidation.writeContentSchema), ContentController.save)
+
+// The long documents, fetched apart from the fields so the field screen does
+// not wait on two hundred kilobytes it has no use for.
+router.get("/pages", ContentController.listPages)
+router.put(
+	"/pages",
+	validateRequest(ContentValidation.writePagesSchema),
+	ContentController.savePages
+)
 
 export const ContentRoutes = router
 export default router

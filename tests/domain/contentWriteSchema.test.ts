@@ -5,11 +5,11 @@ import { CONTENT_REGISTRY } from "../../src/app/modules/content/contentRegistry"
 /**
  * The whitelist, defended.
  *
- * The shop edits 198 marketing strings and 33 pictures. The message catalogue
- * they come from holds 1,862 entries — the other 1,664 are the dashboard's own
- * labels, every button on the storefront, and every validation message. None of
- * those may be reachable from the content screen, and the only thing standing
- * between them and an editor is contentRegistry.ts.
+ * The shop edits 195 marketing values and 33 pictures. The message catalogue
+ * they come from holds far more — the dashboard's own labels, every button on
+ * the storefront, every validation message. None of those may be reachable from
+ * the content screen, and the only thing standing between them and an editor is
+ * contentRegistry.ts.
  *
  * That is a security boundary in the ordinary sense: the caller supplies the
  * key. Without this check, a request naming `common.loading` would rewrite the
@@ -89,6 +89,53 @@ describe("writeContentSchema — only registered keys may be written", () => {
 	})
 
 	/**
+	 * A list is one value, and has to still be one on the way in.
+	 *
+	 * The storefront leaves a malformed list alone rather than breaking the page
+	 * it renders, which is the right thing at read time and the wrong thing to
+	 * rely on at write time: a bad save would report success and change nothing.
+	 * This is what makes that impossible.
+	 */
+	describe("lists — the FAQ the shop may add to", () => {
+		const LIST = "faq.groups.0.items"
+		const list = (items: unknown) =>
+			parse({ entries: [{ key: LIST, locale: "de", value: JSON.stringify(items) }] })
+
+		it("is declared as a list, with the fields one question carries", () => {
+			expect(CONTENT_REGISTRY[LIST]?.type).toBe("list")
+			expect(CONTENT_REGISTRY[LIST]?.fields?.map((f) => f.name)).toEqual(["q", "a"])
+		})
+
+		it("accepts a longer list than the one that shipped", () => {
+			const ten = Array.from({ length: 10 }, (_, i) => ({ q: `Frage ${i}`, a: `Antwort ${i}` }))
+			expect(list(ten).success).toBe(true)
+		})
+
+		it("accepts an emptied list — a group with no questions is a choice", () => {
+			expect(list([]).success).toBe(true)
+		})
+
+		it("refuses a value that is not a list at all", () => {
+			expect(parse({ entries: [{ key: LIST, locale: "de", value: "Frage?" }] }).success).toBe(false)
+			expect(list({ q: "x", a: "y" }).success).toBe(false)
+		})
+
+		it("refuses an item missing one of its fields", () => {
+			expect(list([{ q: "Frage ohne Antwort" }]).success).toBe(false)
+			expect(list([{ q: "x", a: 5 }]).success).toBe(false)
+		})
+
+		it("refuses an item carrying a field nothing renders", () => {
+			expect(list([{ q: "x", a: "y", script: "<script>" }]).success).toBe(false)
+		})
+
+		it("refuses a list long enough to be a document", () => {
+			const many = Array.from({ length: 51 }, () => ({ q: "q", a: "a" }))
+			expect(list(many).success).toBe(false)
+		})
+	})
+
+	/**
 	 * One bad key must not let the rest through. The service writes in a single
 	 * transaction, so a partially-valid payload is either refused whole or saved
 	 * whole — and refusing it whole is the safe half.
@@ -112,9 +159,9 @@ describe("writeContentSchema — only registered keys may be written", () => {
 describe("contentRegistry — shape", () => {
 	const entries = Object.entries(CONTENT_REGISTRY)
 
-	it("covers the 198 editable strings and the 33 pictures", () => {
+	it("covers every editable string and picture", () => {
 		const images = entries.filter(([, d]) => d.type === "image")
-		expect(entries).toHaveLength(231)
+		expect(entries).toHaveLength(228)
 		expect(images).toHaveLength(33)
 	})
 
@@ -146,6 +193,8 @@ describe("contentRegistry — shape", () => {
 
 	it("keeps admin and storefront-chrome namespaces out", () => {
 		const allowed = new Set([
+			"auth",
+			"shop",
 			"home",
 			"about",
 			"custom",

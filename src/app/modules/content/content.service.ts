@@ -1,11 +1,14 @@
 import { type LocaleCode } from "../../../config/locales"
+import { sanitizeRichText } from "../../../domain/html/sanitizeRichText"
 import { storage } from "../../../helpers/storage"
 import { prisma } from "../../../shared/prisma"
 import {
 	CONTENT_GROUPS,
-	CONTENT_LISTS,
+	CONTENT_PAGES,
+	CONTENT_SECTIONS,
 	CONTENT_REGISTRY,
 	isEditableKey,
+	isEditablePage,
 	isImageKey,
 } from "./contentRegistry"
 
@@ -108,7 +111,9 @@ const adminContent = async () => {
 		),
 		definitions: CONTENT_REGISTRY,
 		groups: CONTENT_GROUPS,
-		lists: CONTENT_LISTS,
+		// Where each section is on the site. The screen prints it under the
+		// heading, which is what lets the field labels stay short.
+		sections: CONTENT_SECTIONS,
 	}
 }
 
@@ -170,8 +175,93 @@ const setMany = async (payload: ContentWrite, actorId?: string) => {
 	return { entries: entries.length, media: media.length }
 }
 
+/**
+ * One long document, for one language.
+ *
+ * Null when the shop has never edited it, which is the normal state: the three
+ * legal documents ship with the storefront and it falls back to them. Returning
+ * null rather than an empty document is what lets it tell "not edited" from
+ * "edited to nothing".
+ *
+ * Deliberately not part of `publicContent`. The German privacy policy runs to
+ * about ten thousand words; putting it in the payload every page render merges
+ * would make every page on the site pay for a document three of them show.
+ */
+const publicPage = async (slug: string, locale: LocaleCode) => {
+	if (!isEditablePage(slug)) return null
+
+	const row = await prisma.page.findUnique({
+		where: { slug_locale: { slug, locale } },
+		select: { title: true, bodyHtml: true, updatedAt: true },
+	})
+
+	return row ?? null
+}
+
+/** Every document in every language, for the editor. */
+const adminPages = async () => {
+	const rows = await prisma.page.findMany({
+		select: { slug: true, locale: true, title: true, bodyHtml: true, updatedAt: true },
+	})
+
+	const byLocale: Record<string, Record<string, { title: string; bodyHtml: string }>> = {}
+	for (const row of rows) {
+		if (!isEditablePage(row.slug)) continue
+		const bucket = (byLocale[row.locale] ??= {})
+		bucket[row.slug] = { title: row.title, bodyHtml: row.bodyHtml }
+	}
+
+	return { pages: byLocale, definitions: CONTENT_PAGES }
+}
+
+export interface PageWrite {
+	pages: { slug: string; locale: string; title: string; bodyHtml: string }[]
+}
+
+/**
+ * Save one or more documents.
+ *
+ * The HTML is sanitised on the way in and not merely on the way out: this ends
+ * up injected into a page with dangerouslySetInnerHTML, and the allowlist that
+ * made the WordPress import safe is the same one that has to hold for anything
+ * typed afterwards. An ADMIN is trusted, but a pasted document carrying a
+ * script tag is not something anyone types on purpose.
+ */
+const setPages = async (payload: PageWrite, actorId?: string) => {
+	for (const page of payload.pages) {
+		if (!isEditablePage(page.slug)) {
+			throw new Error(`content: refusing to write an unknown page (${page.slug})`)
+		}
+	}
+
+	await prisma.$transaction(
+		payload.pages.map((page) => {
+			// The sanitiser answers null for "nothing survived", which for a
+			// document the shop deliberately emptied is an empty one, not a
+			// missing row — the column is not nullable and must not become so.
+			const bodyHtml = sanitizeRichText(page.bodyHtml) ?? ""
+			return prisma.page.upsert({
+				where: { slug_locale: { slug: page.slug, locale: page.locale } },
+				create: {
+					slug: page.slug,
+					locale: page.locale,
+					title: page.title,
+					bodyHtml,
+					updatedById: actorId ?? null,
+				},
+				update: { title: page.title, bodyHtml, updatedById: actorId ?? null },
+			})
+		})
+	)
+
+	return { pages: payload.pages.length }
+}
+
 export const ContentService = {
 	publicContent,
 	adminContent,
 	setMany,
+	publicPage,
+	adminPages,
+	setPages,
 }

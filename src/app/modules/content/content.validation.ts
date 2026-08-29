@@ -14,6 +14,15 @@ const LOCALE_CODES = LOCALES.map((l) => l.code)
  */
 const MAX_VALUE = 10_000
 
+/**
+ * A ceiling on a list, so the FAQ cannot become a document.
+ *
+ * Fifty is far past what anybody scrolls through and far short of what would
+ * make the page slow. It exists because a list is one value and the value cap
+ * above counts characters, not items.
+ */
+const MAX_LIST_ITEMS = 50
+
 export const publicContentSchema = z.object({
 	query: z.object({
 		locale: z.enum(LOCALE_CODES as [string, ...string[]]).optional(),
@@ -86,6 +95,48 @@ export const writeContentSchema = z.object({
 				}
 
 				/**
+				 * A list is one JSON value, and has to still be one on the way in.
+				 *
+				 * The storefront leaves a malformed list alone rather than breaking
+				 * the page, which means a bad save would look like it worked and do
+				 * nothing. Refusing it here is what makes that impossible: the
+				 * shape is checked against the fields the registry declares, so an
+				 * item missing its answer, or carrying a key nothing renders, never
+				 * reaches the database.
+				 */
+				const definition = CONTENT_REGISTRY[e.key]
+				if (definition?.type === "list") {
+					const names = (definition.fields ?? []).map((f) => f.name)
+					let parsed: unknown
+					try {
+						parsed = JSON.parse(e.value)
+					} catch {
+						parsed = undefined
+					}
+
+					const bad =
+						!Array.isArray(parsed) ||
+						parsed.length > MAX_LIST_ITEMS ||
+						parsed.some(
+							(item) =>
+								item === null ||
+								typeof item !== "object" ||
+								Array.isArray(item) ||
+								names.some((n) => typeof (item as Record<string, unknown>)[n] !== "string") ||
+								Object.keys(item as Record<string, unknown>).some((k) => !names.includes(k))
+						)
+
+					if (bad) {
+						ctx.addIssue({
+							code: "custom",
+							path: ["entries", i, "value"],
+							message: `"${e.key}" must be a list of at most ${MAX_LIST_ITEMS} items, each carrying ${names.join(" and ")}`,
+						})
+					}
+					return
+				}
+
+				/**
 				 * A placeholder the shipped copy interpolates has to survive the
 				 * edit. Deleting `{year}` from the footer does not shorten the
 				 * sentence, it removes the year — and next-intl renders the
@@ -122,7 +173,47 @@ export const writeContentSchema = z.object({
 		}),
 })
 
+/**
+ * A legal document is measured in tens of thousands of words, not hundreds.
+ *
+ * The German privacy policy is about 85 KB of sanitised HTML today, so this is
+ * generous rather than tight — the ceiling exists to stop a paste going wrong,
+ * not to constrain what the shop may write.
+ */
+const MAX_PAGE = 400_000
+
+export const readPageSchema = z.object({
+	params: z.object({ slug: z.string().trim().min(1).max(60) }),
+	query: z.object({
+		locale: z.enum(LOCALE_CODES as [string, ...string[]]).optional(),
+	}),
+})
+
+/**
+ * The documents the shop may rewrite.
+ *
+ * The slug is checked against the registry in the service, which is the layer
+ * that writes; this refuses the obviously wrong shapes first so the error names
+ * the field rather than the transaction.
+ */
+export const writePagesSchema = z.object({
+	body: z.object({
+		pages: z
+			.array(
+				z.object({
+					slug: z.string().trim().min(1).max(60),
+					locale: z.enum(LOCALE_CODES as [string, ...string[]]),
+					title: z.string().trim().min(1).max(200),
+					bodyHtml: z.string().max(MAX_PAGE),
+				})
+			)
+			.min(1),
+	}),
+})
+
 export const ContentValidation = {
 	publicContentSchema,
 	writeContentSchema,
+	readPageSchema,
+	writePagesSchema,
 }

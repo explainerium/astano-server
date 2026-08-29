@@ -47,8 +47,47 @@ const save: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+/**
+ * One long document, or null where the shop has never edited it.
+ *
+ * Null is a 200, not a 404: "we have no override for this" is the ordinary
+ * answer, and the storefront responds by rendering the copy it shipped with.
+ * A 404 would make an expected state look like a missing page.
+ */
+const readPage: RequestHandler = catchAsync(async (req, res) => {
+	const asked = (req.query as { locale?: string }).locale
+
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await ContentService.publicPage(
+			req.params.slug as string,
+			isLocale(asked) ? asked : DEFAULT_LOCALE
+		),
+	})
+})
+
+const listPages: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: await ContentService.adminPages(),
+	})
+})
+
+const savePages: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("content.saved", req.locale),
+		data: await ContentService.setPages(req.body, req.user?.sub),
+	})
+})
+
 export const ContentController = {
 	listPublic,
 	list,
 	save,
+	readPage,
+	listPages,
+	savePages,
 }
