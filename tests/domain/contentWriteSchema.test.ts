@@ -126,10 +126,21 @@ describe("contentRegistry — shape", () => {
 		}
 	})
 
+	/**
+	 * A picture key has to be recognisable as one from the key alone, because
+	 * that is all the merge on the storefront has to go on.
+	 *
+	 * Three shapes, and the third earns its place: most pictures hang off the
+	 * thing they illustrate (`…slides.0.image`), a couple are a gallery
+	 * (`about.craft.images.0`) — and the dealer cards are plain headings in the
+	 * catalogue rather than objects, so theirs live in a parallel array beside
+	 * them (`dealers.cardImages.0`) rather than by rewriting copy that reads
+	 * perfectly well.
+	 */
 	it("names every picture key so it reads as one", () => {
 		for (const [key, d] of entries) {
 			if (d.type !== "image") continue
-			expect(key, key).toMatch(/\.(image|icon)$|\.images\.\d+$/)
+			expect(key, key).toMatch(/\.(image|icon)$|[Ii]mages\.\d+$/)
 		}
 	})
 
