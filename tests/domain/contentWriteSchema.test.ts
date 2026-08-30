@@ -5,7 +5,7 @@ import { CONTENT_REGISTRY } from "../../src/app/modules/content/contentRegistry"
 /**
  * The whitelist, defended.
  *
- * The shop edits 195 marketing values and 33 pictures. The message catalogue
+ * The shop edits 201 marketing values and 33 pictures. The message catalogue
  * they come from holds far more — the dashboard's own labels, every button on
  * the storefront, every validation message. None of those may be reachable from
  * the content screen, and the only thing standing between them and an editor is
@@ -161,7 +161,7 @@ describe("contentRegistry — shape", () => {
 
 	it("covers every editable string and picture", () => {
 		const images = entries.filter(([, d]) => d.type === "image")
-		expect(entries).toHaveLength(228)
+		expect(entries).toHaveLength(234)
 		expect(images).toHaveLength(33)
 	})
 
