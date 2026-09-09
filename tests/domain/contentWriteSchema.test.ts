@@ -159,9 +159,14 @@ describe("writeContentSchema — only registered keys may be written", () => {
 describe("contentRegistry — shape", () => {
 	const entries = Object.entries(CONTENT_REGISTRY)
 
+	// 232, down from the 234 the first pass produced. Both losses are the same
+	// mistake found twice: a key offered as editable that no component reads, so
+	// an editor could reword it, save, and change nothing. `contact.sending` was
+	// never read at all; `home.popular.empty` stopped being read when the strip
+	// began hiding itself rather than apologising. Notes at both sites.
 	it("covers every editable string and picture", () => {
 		const images = entries.filter(([, d]) => d.type === "image")
-		expect(entries).toHaveLength(234)
+		expect(entries).toHaveLength(232)
 		expect(images).toHaveLength(33)
 	})
 

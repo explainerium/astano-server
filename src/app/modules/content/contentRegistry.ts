@@ -262,7 +262,16 @@ export const CONTENT_REGISTRY: Record<string, ContentDefinition> = {
 	"home.categories.heading": { group: "home", section: "Categories strip", label: "Heading", type: "text" },
 	"home.popular.heading": { group: "home", section: "Popular products", label: "Heading", type: "text" },
 	"home.popular.cta": { group: "home", section: "Popular products", label: "Button", type: "text" },
-	"home.popular.empty": { group: "home", section: "Popular products", label: "Message when there is nothing to show", type: "text" },
+	/*
+	 * `home.popular.empty` was here and is gone with the sentence it named.
+	 *
+	 * It said "no products published yet", written when this strip was the first
+	 * twelve of the catalogue and empty could only mean an empty shop. The shop
+	 * chooses these by hand now and can choose none, so the section hides itself
+	 * instead of printing an apology under its own heading — which left this key
+	 * editable and unread, the failure this file keeps a note about further
+	 * down.
+	 */
 	"home.custom.cards.0.title": { group: "home", section: "Custom manufacture strip", label: "Card 1 heading", type: "text" },
 	"home.custom.cards.0.body": { group: "home", section: "Custom manufacture strip", label: "Card 1 text", type: "textarea" },
 	"home.custom.cards.0.icon": { group: "home", section: "Custom manufacture strip", label: "Card 1 icon", type: "image" },
@@ -401,7 +410,17 @@ export const CONTENT_REGISTRY: Record<string, ContentDefinition> = {
 	"contact.formHeading": { group: "contact", section: "Page", label: "Form heading", type: "text" },
 	"contact.formSubtitle": { group: "contact", section: "Page", label: "Form subtitle", type: "text" },
 	"contact.phoneLabel": { group: "contact", section: "Page", label: "Phone label", type: "text" },
-	"contact.sending": { group: "contact", section: "Page", label: "Sending", type: "text" },
+	/*
+	 * `contact.sending` was here and is not, and the reason is the one this file
+	 * exists to prevent. It is in the catalogue, it resolves, and no component
+	 * reads it — the contact form's submit button says "Wird gesendet…" from
+	 * `common.working`, which ProSubmit renders for every form in the app. An
+	 * editor could reword it, press Save, watch the row be written, and change
+	 * nothing on the page. That is exactly the failure the header and footer
+	 * labels hit in August, and the lesson written down then still stands: a key
+	 * resolving in the catalogue is not proof a component reads it. Check the
+	 * component.
+	 */
 	"contact.submit": { group: "contact", section: "Page", label: "Submit", type: "text" },
 	"contact.success": { group: "contact", section: "Page", label: "Success", type: "text" },
 	"contact.fields.company": { group: "contact", section: "Form fields", label: "Company", type: "text" },

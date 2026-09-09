@@ -41,6 +41,8 @@
 	"product.duplicated": "Product duplicated.",
 	"product.multipleDefaults": "Only one variant can be the default.",
 	"product.attachedAsOption": "This product is attached as an option to other products.",
+	"product.topProductsSaved": "Top products saved.",
+	"product.tooManyTopProducts": "The start page shows at most {limit} top products.",
 	"error.duplicate": "Another record with these details already exists.",
 	"error.duplicateField": "Another record already uses that {field}.",
 	"error.relatedNotFound": "Something you linked to does not exist. Please check your selection.",

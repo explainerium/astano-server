@@ -41,6 +41,8 @@
 	"product.duplicated": "Produkt dupliziert.",
 	"product.multipleDefaults": "Nur eine Variante kann die Standardvariante sein.",
 	"product.attachedAsOption": "Dieses Produkt ist anderen Produkten als Option zugeordnet.",
+	"product.topProductsSaved": "Top-Produkte gespeichert.",
+	"product.tooManyTopProducts": "Auf der Startseite werden höchstens {limit} Top-Produkte gezeigt.",
 	"error.duplicate": "Ein Datensatz mit diesen Angaben existiert bereits.",
 	"error.duplicateField": "Ein anderer Datensatz verwendet bereits diese Angabe: {field}.",
 	"error.relatedNotFound": "Ein verknüpfter Eintrag existiert nicht. Bitte prüfen Sie Ihre Auswahl.",

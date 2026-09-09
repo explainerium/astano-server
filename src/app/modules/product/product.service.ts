@@ -501,6 +501,7 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 		moq: row.moq,
 		sortOrder: row.sortOrder,
 		isTopProduct: row.isTopProduct,
+		topProductOrder: row.topProductOrder,
 		name: t?.name ?? "(untitled)",
 		slug: t?.slug ?? row.id,
 		translations: row.translations,
@@ -654,9 +655,19 @@ const list = async (params: {
 	 * `name` is not here. A product's name lives in its translation row, one per
 	 * language, so there is no column on `products` to order by — it is decided
 	 * in memory below, exactly as price is.
+	 *
+	 * The home page's strip is the exception, and it is a different question.
+	 * `sortOrder` answers "where in this category", which is not "where in the
+	 * strip" — see `topProductOrder` in the schema for why one column cannot be
+	 * both. NULLs last, so a product the shop ticked but has not placed falls in
+	 * behind the ones it has, rather than jumping to the front on a zero nobody
+	 * chose.
 	 */
-	const orderBy: Prisma.ProductOrderByWithRelationInput[] =
-		params.sort === "newest" ? [{ createdAt: "desc" }] : [{ sortOrder: "asc" }, { createdAt: "desc" }]
+	const orderBy: Prisma.ProductOrderByWithRelationInput[] = params.top
+		? [{ topProductOrder: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }]
+		: params.sort === "newest"
+			? [{ createdAt: "desc" }]
+			: [{ sortOrder: "asc" }, { createdAt: "desc" }]
 
 	/**
 	 * Price is not a column, so filtering or sorting by it cannot be a query.
@@ -855,6 +866,10 @@ const adminList = async (params: {
 	visibility?: string
 	categoryId?: string
 	stockStatus?: string
+	/// Only what leads the home page. The one filter the list had no way to
+	/// answer: the chip was on the row, so finding the twelve among fifty-six
+	/// meant reading every row.
+	top?: boolean
 	search?: string
 	page: number
 	limit: number
@@ -867,6 +882,7 @@ const adminList = async (params: {
 
 	const where: Prisma.ProductWhereInput = {
 		...(params.kind ? { kind: params.kind as "MAIN" | "OPTION" } : {}),
+		...(params.top ? { isTopProduct: true } : {}),
 		...(params.status ? { status: params.status as "DRAFT" | "PUBLISHED" | "ARCHIVED" } : {}),
 		...(params.visibility
 			? { visibility: params.visibility as "SHOP_AND_SEARCH" | "SHOP_ONLY" | "SEARCH_ONLY" | "HIDDEN" }
@@ -949,6 +965,127 @@ const adminGetById = async (id: string, locale: LocaleCode) => {
 		})
 	}
 	return toAdminProduct(row, locale)
+}
+
+// ── The home page's strip ────────────────────────────────────────────────────
+
+/**
+ * How many products the strip can hold.
+ *
+ * The grid runs four across and three deep, and the storefront asks for twelve.
+ * Ticking a thirteenth would store a product that never appears, so the screen
+ * is told the ceiling rather than being left to find it out from a page that
+ * silently drops the last one.
+ */
+const TOP_PRODUCT_LIMIT = 12
+
+/** Enough to draw a row in the picker, and nothing the picker cannot use. */
+const topProductSelect = {
+	id: true,
+	status: true,
+	visibility: true,
+	topProductOrder: true,
+	translations: { select: { locale: true, name: true } },
+	featuredAsset: {
+		select: { id: true, storageKey: true, derivatives: true, width: true, height: true },
+	},
+	variants: { select: { sku: true }, take: 1 },
+} satisfies Prisma.ProductSelect
+
+type TopProductRow = Prisma.ProductGetPayload<{ select: typeof topProductSelect }>
+
+const toTopProduct = (row: TopProductRow, locale: LocaleCode) => ({
+	id: row.id,
+	name: pickTranslation(row.translations, locale)?.name ?? "(untitled)",
+	sku: row.variants[0]?.sku ?? null,
+	image: toImage(row.featuredAsset),
+	status: row.status,
+	visibility: row.visibility,
+	/**
+	 * Whether a customer would actually see it there.
+	 *
+	 * The strip is a published-and-visible query, so a product can be ticked,
+	 * saved, sit in this list and appear nowhere — which reads as the feature
+	 * being broken. The screen says so on the row instead.
+	 */
+	live: row.status === "PUBLISHED" && (row.visibility === "SHOP_AND_SEARCH" || row.visibility === "SHOP_ONLY"),
+})
+
+/**
+ * The strip as the home page will draw it, in that order.
+ *
+ * Ordered exactly as the storefront orders it rather than by anything the
+ * dashboard finds convenient — the screen's whole purpose is to show what the
+ * page shows, and two different orders would make it lie.
+ */
+const listTopProducts = async (locale: LocaleCode) => {
+	const rows = await prisma.product.findMany({
+		where: { isTopProduct: true },
+		select: topProductSelect,
+		orderBy: [{ topProductOrder: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }],
+	})
+
+	return { data: rows.map((row) => toTopProduct(row, locale)), limit: TOP_PRODUCT_LIMIT }
+}
+
+/**
+ * Replace the whole strip: which products, and in what order.
+ *
+ * The list arrives complete rather than as a diff, because that is what the
+ * screen holds — an ordered list somebody dragged. Sending "add this, move
+ * that" would mean rebuilding the order on both sides and hoping they agree.
+ *
+ * Three statements in one transaction, and the first is what makes this
+ * idempotent: everything currently ticked and no longer in the list is
+ * untucked. Without it a removed product would keep its tick and stay on the
+ * page, which is the one outcome somebody pressing Save here is trying to
+ * avoid.
+ *
+ * Positions are written as 1..N from the order given, never taken from the
+ * caller. A client that sent its own numbers could send two 3s or skip 4, and
+ * the strip would be arranged by something nobody could read off the screen.
+ */
+const setTopProducts = async (ids: string[], locale: LocaleCode) => {
+	// Dropping repeats here rather than refusing them: two of the same product
+	// is a client that has lost track, not a request to reject, and the second
+	// one has no meaning to preserve.
+	const ordered = [...new Set(ids)]
+
+	if (ordered.length > TOP_PRODUCT_LIMIT) {
+		throw new ApiError(httpStatus.BAD_REQUEST, `At most ${TOP_PRODUCT_LIMIT} top products`, {
+			messageKey: "product.tooManyTopProducts",
+			messageVars: { limit: TOP_PRODUCT_LIMIT },
+		})
+	}
+
+	// Named before anything is written, so a mistyped id fails the request
+	// rather than half-emptying the strip and then failing.
+	if (ordered.length) {
+		const found = await prisma.product.findMany({
+			where: { id: { in: ordered } },
+			select: { id: true },
+		})
+		if (found.length !== ordered.length) {
+			throw new ApiError(httpStatus.NOT_FOUND, "Product not found", {
+				messageKey: "product.notFound",
+			})
+		}
+	}
+
+	await prisma.$transaction([
+		prisma.product.updateMany({
+			where: { isTopProduct: true, id: { notIn: ordered } },
+			data: { isTopProduct: false, topProductOrder: null },
+		}),
+		...ordered.map((id, index) =>
+			prisma.product.update({
+				where: { id },
+				data: { isTopProduct: true, topProductOrder: index + 1 },
+			})
+		),
+	])
+
+	return listTopProducts(locale)
 }
 
 // ── Writes ───────────────────────────────────────────────────────────────────
@@ -1631,6 +1768,8 @@ export const ProductService = {
 	getBySlug,
 	adminList,
 	adminGetById,
+	listTopProducts,
+	setTopProducts,
 	create,
 	duplicate,
 	update,

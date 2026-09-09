@@ -74,6 +74,7 @@ const adminList: RequestHandler = catchAsync(async (req, res) => {
 		visibility?: string
 		categoryId?: string
 		stockStatus?: string
+		top?: string
 		search?: string
 		page?: number
 		limit?: number
@@ -88,6 +89,7 @@ const adminList: RequestHandler = catchAsync(async (req, res) => {
 		visibility: q.visibility,
 		categoryId: q.categoryId,
 		stockStatus: q.stockStatus,
+		top: q.top === "true",
 		search: q.search,
 		page: Number(q.page ?? 1),
 		limit: Number(q.limit ?? 50),
@@ -108,6 +110,39 @@ const adminGetById: RequestHandler = catchAsync(async (req, res) => {
 		statusCode: httpStatus.OK,
 		message: t("common.ok", req.locale),
 		data: await ProductService.adminGetById(req.params.id as string, req.locale),
+	})
+})
+
+/**
+ * The home page's strip, in the order it appears.
+ *
+ * Its own endpoint rather than a filter on the list, because it answers a
+ * different question: not "which products match" but "what is on the page, in
+ * what order" — and it carries the ceiling, so the screen knows when it is full
+ * without hardcoding a number the storefront could change.
+ */
+const topList: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("common.ok", req.locale),
+		// The ceiling travels inside `data` rather than in `meta`, which on this
+		// API is the paging envelope and has a page and a total in it. This list
+		// is never paged — it is at most twelve rows by definition.
+		data: await ProductService.listTopProducts(req.locale),
+	})
+})
+
+/** Replace the strip whole. See the service for why it is not a diff. */
+const saveTop: RequestHandler = catchAsync(async (req, res) => {
+	sendResponse(res, {
+		statusCode: httpStatus.OK,
+		message: t("product.topProductsSaved", req.locale),
+		// Answers with the saved strip, so the screen redraws from what was
+		// stored rather than from what it hoped had been.
+		data: await ProductService.setTopProducts(
+			(req.body as { productIds: string[] }).productIds,
+			req.locale
+		),
 	})
 })
 
@@ -155,6 +190,8 @@ export const ProductController = {
 	getBySlug,
 	adminList,
 	adminGetById,
+	topList,
+	saveTop,
 	create,
 	duplicate,
 	update,

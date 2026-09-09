@@ -28,6 +28,20 @@ AdminProductRoutes.get(
 	ProductController.adminList
 )
 
+/**
+ * The home page's strip. Declared before `/:id`, and that ordering is the
+ * whole of why it works — Express matches in order, so `/top` reaching a route
+ * that reads `req.params.id` would look up a product with the id "top" and
+ * answer 404 for a path that is not an id at all.
+ */
+AdminProductRoutes.get("/top", ProductController.topList)
+
+AdminProductRoutes.put(
+	"/top",
+	validateRequest(ProductValidation.setTopProductsSchema),
+	ProductController.saveTop
+)
+
 AdminProductRoutes.get(
 	"/:id",
 	validateRequest(ProductValidation.productIdSchema),

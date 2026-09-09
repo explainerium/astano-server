@@ -136,10 +136,26 @@ model Product {
   /// products, so that is what this is called.
   ///
   /// Which products lead, and the order they lead in, are two separate
-  /// decisions — this is only the first. `sortOrder` above arranges the set
-  /// this chooses. That is the pair WooCommerce offered and the pair the shop
-  /// asked to have back.
+  /// decisions — this is only the first. `topProductOrder` below is the second.
+  /// That is the pair WooCommerce offered and the pair the shop asked to have
+  /// back.
   isTopProduct Boolean @default(false)
+
+  /// Where this product sits in the home page's strip, left to right.
+  ///
+  /// Its own column rather than reusing `sortOrder`, and that is not
+  /// duplication. `sortOrder` arranges a *category listing*, where every
+  /// product ships at 0 — so promoting a product to the front of the home page
+  /// by giving it 1 would have pushed it behind all 44 products still sitting
+  /// at 0 in every category it belongs to. One number cannot mean "first here"
+  /// and "unchanged there" at the same time.
+  ///
+  /// Nullable, and null sorts last: a product ticked without a position given
+  /// is not "position zero", it is one nobody has placed yet, and it falls in
+  /// behind the ones somebody did place. Every row is null the moment this
+  /// column is added, which is what makes the migration invisible — the strip
+  /// keeps the order it has until the shop drags something.
+  topProductOrder Int?
 
   /// "Preis auf Anfrage". When true the price is hidden, add-to-cart is
   /// blocked, and the product is orderable only through the quote basket (R2).
@@ -213,7 +229,11 @@ model Product {
   @@index([visibility, status])
   @@index([quoteEnabled])
   // The home page runs this filter on every visit, which is more often than
-  // anything else in the catalogue is asked for.
+  // anything else in the catalogue is asked for. Left as one column rather
+  // than widened to carry `topProductOrder` too: this narrows to the dozen
+  // ticked rows, and ordering a dozen rows is not something an index is
+  // needed for — while widening it would mean dropping the index that is
+  // there, which is not something a migration in this project does.
   @@index([isTopProduct])
   // Not for querying — nothing lists products by author. It is what stops
   // deleting a staff account from sequentially scanning the whole catalogue to

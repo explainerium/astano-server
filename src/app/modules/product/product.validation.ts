@@ -305,6 +305,14 @@ export const adminListProductsSchema = z.object({
 			.optional(),
 		categoryId: z.string().uuid().optional(),
 		stockStatus: z.enum(["IN_STOCK", "OUT_OF_STOCK", "ON_BACKORDER"]).optional(),
+		/**
+		 * Only the products that lead the home page.
+		 *
+		 * A string, because it arrives in a query string where every value is
+		 * one. Absent means "no filter" rather than false — a `top=false` that
+		 * listed everything *except* the strip is a question nobody asks.
+		 */
+		top: z.enum(["true"]).optional(),
 		search: z.string().trim().max(200).optional(),
 		page: z.coerce.number().int().min(1).default(1),
 		limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -321,10 +329,28 @@ export const adminListProductsSchema = z.object({
 	}),
 })
 
+/**
+ * The home page's strip, sent whole.
+ *
+ * An ordered list of ids and nothing else: the position is the position in the
+ * array, so there is no second field that can disagree with it. The service
+ * writes 1..N from this order and refuses a list longer than the strip holds.
+ *
+ * An empty array is allowed and means what it says — clear the strip. The
+ * storefront renders an empty section rather than breaking, and refusing it
+ * here would leave "remove the last one" as the one edit the screen cannot make.
+ */
+export const setTopProductsSchema = z.object({
+	body: z.object({
+		productIds: z.array(z.string().uuid()).max(50),
+	}),
+})
+
 export const ProductValidation = {
 	createProductSchema,
 	updateProductSchema,
 	productIdSchema,
 	listProductsSchema,
 	adminListProductsSchema,
+	setTopProductsSchema,
 }
