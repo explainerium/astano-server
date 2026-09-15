@@ -9,6 +9,7 @@ import globalErrorHandler from "./app/middlewares/globalErrorHandler"
 import notFound from "./app/middlewares/notFound"
 import { resolveLocale } from "./app/middlewares/resolveLocale"
 import router from "./app/router"
+import { MeinBueroRoutes } from "./app/modules/erp/meinbuero.routes"
 import { MediaController } from "./app/modules/media/media.controller"
 import { httpLogger } from "./shared/httpLogger"
 import { missingTranslations } from "./i18n"
@@ -69,6 +70,10 @@ app.use(
 		credentials: true,
 	})
 )
+// Ahead of the body parsers: MeinBüro posts raw XML, which a form parser would
+// consume before the route could record it. See the router.
+app.use("/api/v1/erp/meinbuero", MeinBueroRoutes)
+
 app.use(express.json({ limit: "1mb" }))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())

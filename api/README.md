@@ -145,6 +145,7 @@ Everything in `.env.example`, plus:
 | Variable                            | Value                                                                                                            |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `CRON_SECRET`                       | `openssl rand -hex 32`. Vercel sends it as `Authorization: Bearer …`; without it `/cron/run` refuses every call. |
+| `MEINBUERO_AGENT`                   | `openssl rand -hex 24`. The identification entered in MeinBüro for the ERP connection; unset, it is closed.       |
 | `PUBLIC_BASE_URL`                   | This deployment's own URL — media links are built from it.                                                       |
 | `SHOP_BASE_URL`                     | The storefront's URL — every link in every email is built from it.                                               |
 | `CORS_ORIGINS`                      | The storefront's URL.                                                                                            |

@@ -159,6 +159,17 @@ const envSchema = z.object({
 	 */
 	CRON_SECRET: z.string().optional(),
 
+	/**
+	 * The identification WISO MeinBüro Desktop sends as its `User-Agent`.
+	 *
+	 * Typed into MeinBüro as the "Identifikationskennung" of an "Angepasstes
+	 * System" shop, and the whole of its credential — so long enough not to be
+	 * guessed. Unset, the MeinBüro routes answer 404 to everything.
+	 *
+	 * Generate with: openssl rand -hex 24
+	 */
+	MEINBUERO_AGENT: z.string().min(24, "MEINBUERO_AGENT must be at least 24 characters").optional(),
+
 	CORS_ORIGINS: z.string().default("http://localhost:3000"),
 	LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
