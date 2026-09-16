@@ -1,8 +1,9 @@
 import express, { Router, type Request } from "express"
 import { env } from "../../../config"
 import {
-	agentMatches,
 	captureKey,
+	identifies,
+	identityCarriers,
 	operationFor,
 	reply,
 	type ArticleRow,
@@ -79,15 +80,49 @@ MeinBueroRoutes.all(
 			return
 		}
 
-		if (!agentMatches(req.get("user-agent"), env.MEINBUERO_AGENT)) {
-			// Worth a line: a mistyped identification in MeinBüro looks exactly
-			// like this, and the client will only see "connection failed".
-			logger.warn({ file }, "MeinBüro call refused: the identification did not match")
+		const identity = { userAgent: req.get("user-agent"), authorization: req.get("authorization") }
+		const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
+
+		if (!identifies(identity, env.MEINBUERO_AGENT)) {
+			/*
+			 * Recorded, not just refused.
+			 *
+			 * A mistyped identification and a MeinBüro that carries it somewhere
+			 * unexpected look identical from the client's side — "it does not
+			 * connect" — and each costs a round trip to the client's office to
+			 * tell apart. What is kept is the shape of the attempt: which headers
+			 * carried something and how long it was, never the value.
+			 */
+			const shape = identityCarriers(identity).map((value) => value.length)
+			logger.warn({ file, carriers: shape }, "MeinBüro call refused: the identification did not match")
+
+			await storage
+				.put({
+					key: captureKey(new Date(), file, undefined, true),
+					visibility: "PRIVATE",
+					contentType: "application/json",
+					body: Buffer.from(
+						JSON.stringify(
+							{
+								receivedAt: new Date().toISOString(),
+								method: req.method,
+								file,
+								query: req.query,
+								identificationLengths: shape,
+								hasAuthorizationHeader: Boolean(identity.authorization),
+								bodyBytes: raw.length,
+							},
+							null,
+							2
+						)
+					),
+				})
+				.catch((error) => logger.error({ err: error, file }, "refused MeinBüro call could not be recorded"))
+
 			res.status(403).type("text/plain").send("Identification does not match")
 			return
 		}
 
-		const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
 		const params = paramsOf(req, raw)
 		const operation = operationFor(file, params)
 		const now = new Date()

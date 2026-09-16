@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
 	agentMatches,
+	identifies,
 	articleList,
 	captureKey,
 	countRecords,
@@ -40,6 +41,26 @@ describe("agentMatches", () => {
 		expect(agentMatches("anything", undefined)).toBe(false)
 		expect(agentMatches("", "")).toBe(false)
 		expect(agentMatches(undefined, "astano-meinbuero-test")).toBe(false)
+	})
+})
+
+describe("identifies", () => {
+	const ID = "astano-meinbuero-identification"
+	const basic = (user: string, password = "") => `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}`
+
+	it("accepts the identification as the user agent, the connector's own carrier", () => {
+		expect(identifies({ userAgent: ID, authorization: undefined }, ID)).toBe(true)
+	})
+
+	it("accepts it as basic credentials too — the dialog calls it a user name", () => {
+		expect(identifies({ userAgent: "MeinBuero", authorization: basic(ID) }, ID)).toBe(true)
+		expect(identifies({ userAgent: "MeinBuero", authorization: basic("astano", ID) }, ID)).toBe(true)
+	})
+
+	it("refuses anything else, and anything at all when unconfigured", () => {
+		expect(identifies({ userAgent: "MeinBuero", authorization: basic("astano", "wrong") }, ID)).toBe(false)
+		expect(identifies({ userAgent: ID, authorization: undefined }, undefined)).toBe(false)
+		expect(identifies({ userAgent: undefined, authorization: "Bearer nonsense" }, ID)).toBe(false)
 	})
 })
 

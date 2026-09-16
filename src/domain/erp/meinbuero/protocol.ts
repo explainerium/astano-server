@@ -63,6 +63,38 @@ export const agentMatches = (offered: string | undefined, expected: string | und
 	return a.length === b.length && crypto.timingSafeEqual(a, b)
 }
 
+export interface OfferedIdentity {
+	userAgent: string | undefined
+	authorization: string | undefined
+}
+
+/**
+ * Where the "Benutzername" from MeinBüro's add-shop dialog arrives.
+ *
+ * Buhl's connector compares it against `$_SERVER['HTTP_USER_AGENT']`, so that
+ * is the documented carrier. The dialog calls the field a user name and offers
+ * a password beside it, though, and a client that also sends HTTP Basic
+ * credentials is entirely plausible — so both are accepted. The alternative is
+ * a refusal the client can only report as "it does not connect".
+ *
+ * The password box is the encryption key, and stays empty: nothing here
+ * encrypts its responses.
+ */
+export const identityCarriers = ({ userAgent, authorization }: OfferedIdentity): string[] => {
+	const offered = [userAgent]
+
+	if (authorization?.toLowerCase().startsWith("basic ")) {
+		const decoded = Buffer.from(authorization.slice(6), "base64").toString("utf8")
+		const separator = decoded.indexOf(":")
+		offered.push(separator === -1 ? decoded : decoded.slice(0, separator), decoded.slice(separator + 1))
+	}
+
+	return offered.filter((value): value is string => Boolean(value))
+}
+
+export const identifies = (identity: OfferedIdentity, expected: string | undefined): boolean =>
+	identityCarriers(identity).some((offered) => agentMatches(offered, expected))
+
 export const operationFor = (file: string, params: Params): Operation => {
 	switch (file.toLowerCase()) {
 		case "mb_osc.php":
@@ -161,10 +193,10 @@ export const pagingInformation = (articleCount: number): string =>
 export const countRecords = (xml: string): number => xml.match(/<ArtikelnummerWebshop[\s/>]/g)?.length ?? 0
 
 /** Sortable, and safe as an object key whatever MeinBüro put in the parameters. */
-export const captureKey = (now: Date, file: string, sync: string | undefined): string => {
+export const captureKey = (now: Date, file: string, sync: string | undefined, refused = false): string => {
 	const safe = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 60)
 	const name = [safe(file.replace(/\.php$/i, "")), sync ? safe(sync) : null].filter(Boolean).join("_")
-	return `erp/meinbuero/captures/${now.toISOString().replaceAll(":", "-")}_${name}.json`
+	return `erp/meinbuero/captures/${refused ? "refused/" : ""}${now.toISOString().replaceAll(":", "-")}_${name}.json`
 }
 
 const xml = (body: string): Reply => ({ status: 200, contentType: "text/xml; charset=utf-8", body })
