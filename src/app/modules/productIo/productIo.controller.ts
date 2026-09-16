@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express"
+import { decodeCsvBuffer } from "../../../domain/pricing/priceList"
 import { catchAsync } from "../../../shared/catchAsync"
 import { httpStatus } from "../../../shared/httpStatus"
 import { sendResponse } from "../../../shared/sendResponse"
@@ -9,10 +10,12 @@ import { ProductIoService } from "./productIo.service"
 /**
  * The uploaded file, as text.
  *
- * Decoded as UTF-8 and checked for the replacement character, because a
- * Windows-1252 export of a German catalogue decodes without throwing and simply
- * turns every ü into a black diamond — which would then be written into the
- * catalogue as a product name.
+ * A Windows-1252 export of a German catalogue decodes as UTF-8 without
+ * throwing and turns every ü into a replacement character, which would then be
+ * written into the catalogue as a product name. That used to be refused; it is
+ * now read, because the file that matters most here comes straight out of the
+ * client's ERP in exactly that encoding, and "re-save it as UTF-8 first" is a
+ * step that gets skipped.
  */
 const readUpload = (file: Express.Multer.File | undefined): string => {
 	if (!file) {
@@ -21,15 +24,7 @@ const readUpload = (file: Express.Multer.File | undefined): string => {
 		})
 	}
 
-	const text = file.buffer.toString("utf8")
-
-	if (text.includes("�")) {
-		throw new ApiError(httpStatus.BAD_REQUEST, "That file is not UTF-8", {
-			messageKey: "productIo.notUtf8",
-		})
-	}
-
-	return text
+	return decodeCsvBuffer(file.buffer).text
 }
 
 /** Header names and a suggested mapping, so the admin can correct it. */
