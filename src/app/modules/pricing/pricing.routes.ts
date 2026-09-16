@@ -1,6 +1,8 @@
 import { Router } from "express"
+import multer from "multer"
 import { auth } from "../../middlewares/auth"
 import { validateRequest } from "../../middlewares/validateRequest"
+import { PriceListIoController } from "./priceListIo.controller"
 import { PricingController } from "./pricing.controller"
 import { PricingValidation } from "./pricing.validation"
 
@@ -46,5 +48,20 @@ AdminPricingRoutes.put(
 
 AdminPricingRoutes.get("/tier-priority", PricingController.tierPriority)
 AdminPricingRoutes.put("/tier-priority", PricingController.saveTierPriority)
+
+/**
+ * The ERP's price list, which is a ladder for every article in one file.
+ *
+ * In memory, and 20 MB: the client's real export is 492 kB of 12,899 rows, so
+ * the limit is about refusing a mistake rather than rationing a real file.
+ */
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
+
+AdminPricingRoutes.post("/price-list/analyse", upload.single("file"), PriceListIoController.analyse)
+
+// One route for the preview and the real thing, told apart by `dryRun` — a
+// preview that runs different code from the import is a preview that can be
+// wrong, and the whole point of it is to be believed.
+AdminPricingRoutes.post("/price-list/import", upload.single("file"), PriceListIoController.run)
 
 export default AdminPricingRoutes

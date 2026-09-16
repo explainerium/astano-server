@@ -2,6 +2,7 @@ import {
 	DeleteObjectCommand,
 	GetObjectCommand,
 	HeadObjectCommand,
+	ListObjectsV2Command,
 	PutObjectCommand,
 	S3Client,
 } from "@aws-sdk/client-s3"
@@ -142,5 +143,28 @@ export const r2Driver: StorageDriver = {
 		} catch {
 			return false
 		}
+	},
+
+	async list(prefix: string, visibility: Visibility, limit = 1000): Promise<string[]> {
+		const keys: string[] = []
+		let token: string | undefined
+
+		// A page is 1,000 keys at most, so a prefix with more than that needs the
+		// continuation token rather than one hopeful request.
+		do {
+			const page = await s3().send(
+				new ListObjectsV2Command({
+					Bucket: bucketFor(visibility),
+					Prefix: prefix,
+					ContinuationToken: token,
+					MaxKeys: Math.min(1000, limit - keys.length),
+				})
+			)
+
+			for (const object of page.Contents ?? []) if (object.Key) keys.push(object.Key)
+			token = page.IsTruncated ? page.NextContinuationToken : undefined
+		} while (token && keys.length < limit)
+
+		return keys.sort()
 	},
 }

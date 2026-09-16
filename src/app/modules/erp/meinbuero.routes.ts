@@ -66,6 +66,43 @@ const articles = async (): Promise<ArticleRow[]> => {
 
 const articleCount = () => prisma.productVariant.count({ where: { sku: { not: null } } })
 
+const CAPTURE_PREFIX = "erp/meinbuero/captures/"
+
+/**
+ * Reading the captures back, with the same identification MeinBüro uses.
+ *
+ * Registered before `/:file` so the name cannot be mistaken for a connector
+ * file. It exists because the captures are the only record of what MeinBüro
+ * sent, and whoever is debugging the connection may have no console for the
+ * object store — asking the API is then the difference between a fix and a
+ * guess. Confined to the captures prefix: this is not a way to read the
+ * customers' design files.
+ */
+MeinBueroRoutes.get(
+	"/_captures",
+	catchAsync(async (req, res) => {
+		if (!identifies({ userAgent: req.get("user-agent"), authorization: req.get("authorization") }, env.MEINBUERO_AGENT)) {
+			res.status(403).type("text/plain").send("Identification does not match")
+			return
+		}
+
+		const key = typeof req.query.key === "string" ? req.query.key : null
+
+		if (!key) {
+			const keys = await storage.list(CAPTURE_PREFIX, "PRIVATE", 500)
+			res.json({ count: keys.length, keys })
+			return
+		}
+
+		if (!key.startsWith(CAPTURE_PREFIX) || key.includes("..")) {
+			res.status(400).type("text/plain").send("Key is outside the captures")
+			return
+		}
+
+		res.type("application/json").send(await storage.get(key, "PRIVATE"))
+	})
+)
+
 MeinBueroRoutes.all(
 	"/:file",
 	// Everything as bytes, whatever MeinBüro labels it. 20 MB holds a full

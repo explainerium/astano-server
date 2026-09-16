@@ -49,4 +49,13 @@ export interface StorageDriver {
 	signedUrl(key: string, expiresInSeconds: number): Promise<string>
 
 	exists(key: string, visibility: Visibility): Promise<boolean>
+
+	/**
+	 * The keys under a prefix, oldest first by key.
+	 *
+	 * Added for the ERP captures, which are written by a machine and read back
+	 * by whoever is debugging the connection — there is no database row naming
+	 * them, so the store itself has to be askable.
+	 */
+	list(prefix: string, visibility: Visibility, limit?: number): Promise<string[]>
 }

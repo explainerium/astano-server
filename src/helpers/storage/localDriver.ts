@@ -74,6 +74,35 @@ export const localDriver: StorageDriver = {
 			return false
 		}
 	},
+
+	async list(prefix: string, visibility: Visibility, limit = 1000): Promise<string[]> {
+		const base = dirFor(visibility)
+		const keys: string[] = []
+
+		const walk = async (dir: string): Promise<void> => {
+			let entries
+			try {
+				entries = await fs.readdir(dir, { withFileTypes: true })
+			} catch {
+				// A prefix nothing has been written under yet is empty, not an error.
+				return
+			}
+
+			for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+				const full = path.join(dir, entry.name)
+				if (entry.isDirectory()) {
+					await walk(full)
+					continue
+				}
+
+				const key = path.relative(base, full).split(path.sep).join("/")
+				if (key.startsWith(prefix)) keys.push(key)
+			}
+		}
+
+		await walk(base)
+		return keys.sort().slice(0, limit)
+	},
 }
 
 /** Verifies a local signed URL. Unused by the R2 driver, which signs its own. */
