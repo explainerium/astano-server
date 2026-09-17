@@ -15,7 +15,16 @@ import { AiController } from "./ai.controller"
  */
 const generateSchema = z.object({
 	body: z.object({
-		kind: z.enum(["product", "productShort", "category", "content"]),
+		kind: z.enum([
+			"product",
+			"productShort",
+			"category",
+			"content",
+			"metaTitle",
+			"metaDescription",
+		]),
+		/** Overrides the kind's usual shape — the same kind may sit in a plain box. */
+		format: z.enum(["html", "text"]).optional(),
 		locale: z.enum(["de", "en"]),
 		brief: z.string().trim().max(MAX_BRIEF).default(""),
 		name: z.string().trim().max(200).optional(),

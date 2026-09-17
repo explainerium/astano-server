@@ -60,6 +60,20 @@ export type ContentType =
 	| "list"
 
 export type ContentGroup =
+	/**
+	 * What Google prints, kept apart from what the page prints.
+	 *
+	 * These were the same strings until the shop asked to edit its SEO: every
+	 * marketing page used `about.title` for its heading *and* for its search
+	 * result, so shortening a heading silently rewrote the title in Google. A
+	 * heading and a search title are different jobs — one is read in place, the
+	 * other in a list of ten competitors — and they need different boxes.
+	 *
+	 * Empty is the useful default: each page falls back to the heading and intro
+	 * it shows today, so this screen starts blank and nothing changes until
+	 * somebody deliberately writes a title for search.
+	 */
+	| "seo"
 	| "home"
 	| "about"
 	| "custom"
@@ -121,6 +135,12 @@ export const CONTENT_GROUPS: { id: ContentGroup; title: string; blurb: string }[
 	{ id: "contact", title: "Contact", blurb: "The page and its form labels." },
 	{ id: "payment", title: "Payment & shipping", blurb: "Terms, methods and delivery." },
 	{ id: "shell", title: "Header & footer", blurb: "The menu and the footer, on every page." },
+	{
+		id: "seo",
+		title: "Search engines",
+		blurb:
+			"The title and description Google shows for each page. Leave one empty and the page uses its own heading, as it does today.",
+	},
 	/*
 	 * The sentences on the sign-in, registration and dealer-application pages.
 	 *
@@ -218,6 +238,9 @@ export const CONTENT_SECTIONS: Record<string, string> = {
 	"auth/Dealer application": "The dealer application, and what an applicant is told afterwards.",
 	"auth/Password": "The forgotten-password and new-password pages.",
 	"product/Options": "The Options area on every product page.",
+	"seo/Home page": "The home page, as it appears in a search result.",
+	"seo/Product range": "The /products archive.",
+	"seo/Marketing pages": "About us, Custom manufacture, Quality, Dealers, FAQs, Contact, Payment & shipping.",
 }
 
 /**
@@ -450,6 +473,35 @@ export const CONTENT_REGISTRY: Record<string, ContentDefinition> = {
 	"payment.terms.due": { group: "payment", section: "Terms", label: "Due", type: "textarea" },
 	"payment.terms.invoice": { group: "payment", section: "Terms", label: "Invoice", type: "textarea" },
 	"payment.terms.methodsTitle": { group: "payment", section: "Terms", label: "Methods title", type: "text" },
+	/*
+	 * Search titles and descriptions, one pair per indexed page.
+	 *
+	 * Only the pages a search engine is meant to reach are here: the account,
+	 * cart, checkout and password pages already answer `robots: noindex`, and a
+	 * box for a page nobody can find would be a box nobody should fill in.
+	 *
+	 * Products and categories are absent on purpose — theirs are per record and
+	 * live on the product and category editors, beside the name they belong to.
+	 */
+	"seo.home.title": { group: "seo", section: "Home page", label: "Search title", type: "text" },
+	"seo.home.description": { group: "seo", section: "Home page", label: "Search description", type: "textarea" },
+	"seo.products.title": { group: "seo", section: "Product range", label: "Search title", type: "text" },
+	"seo.products.description": { group: "seo", section: "Product range", label: "Search description", type: "textarea" },
+	"seo.about.title": { group: "seo", section: "Marketing pages", label: "About us — title", type: "text" },
+	"seo.about.description": { group: "seo", section: "Marketing pages", label: "About us — description", type: "textarea" },
+	"seo.custom.title": { group: "seo", section: "Marketing pages", label: "Custom manufacture — title", type: "text" },
+	"seo.custom.description": { group: "seo", section: "Marketing pages", label: "Custom manufacture — description", type: "textarea" },
+	"seo.quality.title": { group: "seo", section: "Marketing pages", label: "Quality — title", type: "text" },
+	"seo.quality.description": { group: "seo", section: "Marketing pages", label: "Quality — description", type: "textarea" },
+	"seo.dealers.title": { group: "seo", section: "Marketing pages", label: "Dealers — title", type: "text" },
+	"seo.dealers.description": { group: "seo", section: "Marketing pages", label: "Dealers — description", type: "textarea" },
+	"seo.faq.title": { group: "seo", section: "Marketing pages", label: "FAQs — title", type: "text" },
+	"seo.faq.description": { group: "seo", section: "Marketing pages", label: "FAQs — description", type: "textarea" },
+	"seo.contact.title": { group: "seo", section: "Marketing pages", label: "Contact — title", type: "text" },
+	"seo.contact.description": { group: "seo", section: "Marketing pages", label: "Contact — description", type: "textarea" },
+	"seo.payment.title": { group: "seo", section: "Marketing pages", label: "Payment & shipping — title", type: "text" },
+	"seo.payment.description": { group: "seo", section: "Marketing pages", label: "Payment & shipping — description", type: "textarea" },
+
 	"site.title": { group: "shell", section: "Site", label: "Heading", type: "text" },
 	"site.description": { group: "shell", section: "Site", label: "Description", type: "text" },
 	"home.topBar": { group: "shell", section: "Top bar", label: "Top bar", type: "text" },

@@ -3,6 +3,7 @@ import {
 	buildPrompts,
 	buildTranslationPrompts,
 	DEFAULT_MODEL,
+	formatOf,
 	MAX_BRIEF,
 	stripFences,
 	toPlainText,
@@ -127,6 +128,36 @@ describe("buildTranslationPrompts", () => {
 		expect(short.maxTokens).toBeGreaterThanOrEqual(300)
 		expect(long.maxTokens).toBeGreaterThan(short.maxTokens)
 		expect(long.maxTokens).toBeLessThanOrEqual(4000)
+	})
+})
+
+describe("the plain boxes — meta fields, and a kind in a textarea", () => {
+	it("gives a search title and description their own lengths", () => {
+		const title = buildPrompts(input({ kind: "metaTitle" }))
+		const description = buildPrompts(input({ kind: "metaDescription" }))
+
+		expect(title.system).toContain("at most 60 characters")
+		expect(title.system).toContain("Do not append the shop name")
+		expect(description.system).toContain("at most 155 characters")
+		expect(title.maxTokens).toBeLessThan(description.maxTokens)
+	})
+
+	it("says plain text for a kind that normally returns HTML, when the box is plain", () => {
+		// A category description is a textarea here and rich text on a product,
+		// which is the whole reason `format` overrides the kind.
+		const plain = buildPrompts(input({ kind: "category", format: "text" }))
+		expect(plain.system).toContain("return no HTML tags of any kind")
+
+		const html = buildPrompts(input({ kind: "category" }))
+		expect(html.system).not.toContain("return no HTML tags of any kind")
+	})
+
+	it("knows each kind's usual shape", () => {
+		expect(formatOf({ kind: "product" })).toBe("html")
+		expect(formatOf({ kind: "content" })).toBe("html")
+		expect(formatOf({ kind: "metaTitle" })).toBe("text")
+		expect(formatOf({ kind: "metaDescription" })).toBe("text")
+		expect(formatOf({ kind: "product", format: "text" })).toBe("text")
 	})
 })
 

@@ -27,6 +27,9 @@ export interface CategoryView {
 	name: string
 	slug: string
 	description: string | null
+	/** What a search engine prints. Null falls back to the name and description. */
+	metaTitle: string | null
+	metaDescription: string | null
 	/** Both optional, and both null far more often than not. */
 	image: CategoryAsset | null
 	icon: CategoryAsset | null
@@ -109,6 +112,11 @@ const view = (row: CategoryWithTranslations, locale: LocaleCode): CategoryView =
 		name: t?.name ?? "(untitled)",
 		slug: t?.slug ?? row.id,
 		description: t?.description ?? null,
+		// Served publicly on purpose: the category archive's own <title> is built
+		// from these, and that page is rendered on the server before any admin
+		// session exists to ask for them.
+		metaTitle: t?.metaTitle ?? null,
+		metaDescription: t?.metaDescription ?? null,
 		image: toAsset(row.image),
 		icon: toAsset(row.icon),
 		productCount: row._count.products,

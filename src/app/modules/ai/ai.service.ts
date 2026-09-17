@@ -2,6 +2,7 @@ import {
 	buildPrompts,
 	buildTranslationPrompts,
 	DEFAULT_MODEL,
+	formatOf,
 	stripFences,
 	toPlainText,
 	type AiProvider,
@@ -137,9 +138,7 @@ const generate = async (input: GenerateInput): Promise<GenerateResult> => {
 	 * anybody can check on every press of a button.
 	 */
 	const text =
-		input.kind === "productShort"
-			? toPlainText(raw)
-			: (sanitizeRichText(stripFences(raw)) ?? "")
+		formatOf(input) === "text" ? toPlainText(raw) : (sanitizeRichText(stripFences(raw)) ?? "")
 
 	return { text, provider: config.provider, model: config.model }
 }

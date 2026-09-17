@@ -14,10 +14,30 @@
 export type AiProvider = "anthropic" | "openai"
 
 /** What the field being written is, which decides the shape of the answer. */
-export type AiKind = "product" | "productShort" | "category" | "content"
+export type AiKind =
+	| "product"
+	| "productShort"
+	| "category"
+	| "content"
+	/** The blue line in a search result. Its own kind: 60 characters is a format, not a preference. */
+	| "metaTitle"
+	/** The two lines under it. */
+	| "metaDescription"
+
+/**
+ * Overrides the kind's usual shape.
+ *
+ * The same field can be rich text in one place and a plain box in another — a
+ * product description is HTML, a category description is a textarea holding
+ * text. Rather than a second kind per shape, the caller says which box it is
+ * filling and the kind keeps meaning what it says.
+ */
+export type AiFormat = "html" | "text"
 
 export interface GenerateInput {
 	kind: AiKind
+	/** Defaults to whatever the kind usually returns. */
+	format?: AiFormat
 	locale: "de" | "en"
 	/** What the admin typed: "stainless steel straw, 6mm, engraved". */
 	brief: string
@@ -97,7 +117,38 @@ const SHAPE: Record<AiKind, { instruction: string; maxTokens: number }> = {
 			"No headings unless the brief asks for them.",
 		maxTokens: 1200,
 	},
+	/*
+	 * Both of these are read in a list of ten competitors rather than on the
+	 * page, and both are cut off mid-word past their length. The limits are the
+	 * point of the field, so they are in the instruction rather than left to the
+	 * model's sense of brevity.
+	 */
+	metaTitle: {
+		instruction:
+			"Write the title for a search engine result: at most 60 characters, plain text, no quotation marks. " +
+			"Say what the page is, with the words somebody would search for. Do not append the shop name.",
+		maxTokens: 120,
+	},
+	metaDescription: {
+		instruction:
+			"Write the description under a search engine result: one or two sentences, at most 155 characters, " +
+			"plain text, no quotation marks. Say what the page offers and give a reason to click it.",
+		maxTokens: 250,
+	},
 }
+
+/** What a kind returns unless the caller asks for the other shape. */
+const DEFAULT_FORMAT: Record<AiKind, AiFormat> = {
+	product: "html",
+	productShort: "text",
+	category: "html",
+	content: "html",
+	metaTitle: "text",
+	metaDescription: "text",
+}
+
+export const formatOf = (input: { kind: AiKind; format?: AiFormat }): AiFormat =>
+	input.format ?? DEFAULT_FORMAT[input.kind]
 
 const clamp = (value: string | undefined, limit: number): string =>
 	(value ?? "").replace(/\s+/g, " ").trim().slice(0, limit)
@@ -111,8 +162,15 @@ export const buildPrompts = (input: GenerateInput): Prompts => {
 		`Write in ${LANGUAGE[input.locale]}.`,
 		voice,
 		shape.instruction,
+		// Said again when the box is a plain one, because the shape instruction
+		// above asks for HTML for most kinds and the two would otherwise disagree.
+		formatOf(input) === "text"
+			? `This field holds plain text: return no HTML tags of any kind.`
+			: null,
 		`Return only the text itself — no preamble, no explanation, no code fences.`,
-	].join("\n\n")
+	]
+		.filter(Boolean)
+		.join("\n\n")
 
 	const facts = (input.facts ?? []).slice(0, MAX_FACTS).map((fact) => clamp(fact, 120)).filter(Boolean)
 	const existing = clamp(input.existing, MAX_EXISTING)
