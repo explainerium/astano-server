@@ -5,6 +5,7 @@ import { AdminContactRoutes, ContactRoutes } from "../modules/contact/contact.ro
 import { ContentRoutes } from "../modules/content/content.routes"
 import { AdminNewsletterRoutes, NewsletterRoutes } from "../modules/newsletter/newsletter.routes"
 import { WishlistRoutes } from "../modules/wishlist/wishlist.routes"
+import { AdminAiRoutes } from "../modules/ai/ai.routes"
 import { AdminAttributeRoutes, AttributeRoutes } from "../modules/attribute/attribute.routes"
 import { AuthRoutes } from "../modules/auth/auth.routes"
 import { BundleRoutes } from "../modules/bundle/bundle.routes"
@@ -62,6 +63,7 @@ const moduleRoutes: ModuleRoute[] = [
 	{ path: "/admin/products", route: AdminProductRoutes },
 	{ path: "/admin/products-io", route: ProductIoRoutes },
 	{ path: "/admin/pricing", route: AdminPricingRoutes },
+	{ path: "/admin/ai", route: AdminAiRoutes },
 	{ path: "/media", route: MediaRoutes },
 	{ path: "/cart", route: CartRoutes },
 	{ path: "/configure", route: BundleRoutes },

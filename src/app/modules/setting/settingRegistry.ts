@@ -128,6 +128,13 @@ export const SETTING_GROUPS: {
 		blurb: "Parts of the shop that can be switched off entirely.",
 		section: "shop",
 	},
+	{
+		key: "ai",
+		title: "AI text",
+		blurb:
+			"The assistant that drafts product and category text. Off until an API key is entered; it writes nothing on its own.",
+		section: "shop",
+	},
 
 	// ── Business ───────────────────────────────────────────────────────────
 	{
@@ -281,6 +288,59 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 		group: "invoice",
 	},
 	"invoice.numberPrefix": { label: "Invoice number prefix", type: "text", fallback: "AST-", group: "invoice" },
+
+	// ── AI text ────────────────────────────────────────────────────────────
+	/*
+	 * The key lives here rather than in the environment for the same reason the
+	 * SMTP password does: the account is the client's, and they should be able to
+	 * add, change or revoke it without a deployment. Everything here is
+	 * staff-only — none of it is ever served to the storefront.
+	 */
+	"ai.enabled": {
+		label: "Offer AI text in the editors",
+		help: "Adds a button to the description fields. Nothing is ever written or sent without somebody pressing it.",
+		type: "boolean",
+		fallback: false,
+		group: "ai",
+	},
+	"ai.provider": {
+		label: "Service",
+		help: "Both are paid per use and billed separately from any ChatGPT or Claude subscription.",
+		type: "select",
+		options: [
+			{ value: "anthropic", label: "Claude (Anthropic)" },
+			{ value: "openai", label: "ChatGPT (OpenAI)" },
+		],
+		fallback: "anthropic",
+		group: "ai",
+	},
+	"ai.apiKey": {
+		/*
+		 * Worth saying on the screen: a ChatGPT or Claude subscription does not
+		 * carry API access, and the key for it is created in a different place
+		 * from the one people log into. Without this sentence the first attempt is
+		 * a pasted session token that fails as "invalid key".
+		 */
+		help: "From console.anthropic.com or platform.openai.com — not your ChatGPT or Claude login, and not covered by a subscription. Stored encrypted; it is never shown again. Leave empty to keep the current one.",
+		label: "API key",
+		type: "password",
+		fallback: "",
+		group: "ai",
+	},
+	"ai.model": {
+		label: "Model",
+		help: "Leave empty for the default — claude-opus-5 for Claude, gpt-4o-mini for ChatGPT. Cheaper Claude models: claude-haiku-4-5, claude-sonnet-5.",
+		type: "text",
+		fallback: "",
+		group: "ai",
+	},
+	"ai.voice": {
+		label: "How the text should read",
+		help: 'Given to the model on every request. For example: "Kurz und sachlich, Sie-Form, keine Werbesprache." Leave empty for a plain, formal default.',
+		type: "text",
+		fallback: "",
+		group: "ai",
+	},
 
 	// ── Mail server ────────────────────────────────────────────────────────
 	/*
