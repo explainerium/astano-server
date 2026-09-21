@@ -66,3 +66,23 @@ export const mediaLibraryLimiter = make(
 	15 * 60 * 1000,
 	"Too many uploads. Please wait a moment and try again."
 )
+
+/**
+ * The AI text buttons, which only staff can reach.
+ *
+ * They ran behind `writeLimiter` — thirty per quarter hour, the checkout
+ * figure — and translation is one request per field. A product's "Fill from
+ * German" is five fields and an attribute's is its name plus every value, so
+ * the shop translating its own catalogue in one sitting ran into a limit
+ * written for customers placing orders: the eight attributes alone are 42
+ * labels.
+ *
+ * Still limited, because every call is on the shop's own API bill and a
+ * runaway loop should stop somewhere. Three hundred covers several products
+ * and the whole attribute list in one sitting.
+ */
+export const aiLimiter = make(
+	300,
+	15 * 60 * 1000,
+	"Too many AI requests. Please wait a moment and try again."
+)

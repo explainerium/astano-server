@@ -2,7 +2,7 @@ import { Router } from "express"
 import { z } from "zod"
 import { MAX_BRIEF, MAX_EXISTING, MAX_FACTS } from "../../../domain/ai/prompt"
 import { auth } from "../../middlewares/auth"
-import { writeLimiter } from "../../middlewares/rateLimiter"
+import { aiLimiter } from "../../middlewares/rateLimiter"
 import { validateRequest } from "../../middlewares/validateRequest"
 import { AiController } from "./ai.controller"
 
@@ -49,9 +49,9 @@ const router = Router()
 router.use(auth("ADMIN", "SHOP_MANAGER"))
 
 router.get("/", AiController.status)
-router.post("/generate", writeLimiter, validateRequest(generateSchema), AiController.generate)
-router.post("/translate", writeLimiter, validateRequest(translateSchema), AiController.translate)
-router.post("/test", writeLimiter, AiController.test)
+router.post("/generate", aiLimiter, validateRequest(generateSchema), AiController.generate)
+router.post("/translate", aiLimiter, validateRequest(translateSchema), AiController.translate)
+router.post("/test", aiLimiter, AiController.test)
 
 export const AdminAiRoutes = router
 export default router
