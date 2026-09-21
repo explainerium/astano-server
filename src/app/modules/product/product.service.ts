@@ -40,7 +40,27 @@ const detailInclude = {
 	createdBy: { select: { id: true, firstName: true, lastName: true, email: true } },
 	translations: true,
 	tabs: { include: { translations: true }, orderBy: { sortOrder: "asc" } },
-	categories: { include: { category: { include: { translations: true } } } },
+	/*
+	 * With the categories above each one, so the product page can print the
+	 * whole way back — "Backen & Foodshaping › Ausstechformen individuell ›
+	 * Brot/Sandwich Ausstecher" — rather than a single name with nowhere to go.
+	 * Three levels: the tree is two deep today, and one more costs nothing.
+	 */
+	categories: {
+		include: {
+			category: {
+				include: {
+					translations: true,
+					parent: {
+						include: {
+							translations: true,
+							parent: { include: { translations: true, parent: { include: { translations: true } } } },
+						},
+					},
+				},
+			},
+		},
+	},
 	/*
 	 * The attribute and the value, not just their ids.
 	 *
@@ -163,6 +183,33 @@ const toPriceInputs = (
  * `kind` is deliberately absent: it is an admin-only dashboard label and must
  * never reach the frontend.
  */
+/** A category and whatever the include above loaded over it. */
+interface CategoryWithParents {
+	id: string
+	isHidden: boolean
+	translations: { locale: string; name: string; slug: string }[]
+	parent?: CategoryWithParents | null
+}
+
+/**
+ * The categories above this one, outermost first, as links.
+ *
+ * A hidden one is left out rather than ending the trail: hiding a grouping
+ * category keeps it off the menus, and a breadcrumb is a menu.
+ */
+const parentTrail = (
+	category: CategoryWithParents,
+	locale: LocaleCode
+): { id: string; name: string; slug: string }[] => {
+	const trail: { id: string; name: string; slug: string }[] = []
+	for (let up = category.parent; up; up = up.parent) {
+		if (up.isHidden) continue
+		const t = pickTranslation(up.translations, locale)
+		trail.unshift({ id: up.id, name: t?.name ?? "", slug: t?.slug ?? "" })
+	}
+	return trail
+}
+
 const toPublicProduct = (
 	row: ProductDetail,
 	locale: LocaleCode,
@@ -275,7 +322,12 @@ const toPublicProduct = (
 			.filter((c) => !c.category.isHidden)
 			.map((c) => {
 				const ct = pickTranslation(c.category.translations, locale)
-				return { id: c.category.id, name: ct?.name ?? "", slug: ct?.slug ?? "" }
+				return {
+					id: c.category.id,
+					name: ct?.name ?? "",
+					slug: ct?.slug ?? "",
+					parents: parentTrail(c.category, locale),
+				}
 			}),
 
 		/**
