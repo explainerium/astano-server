@@ -528,6 +528,12 @@ model ProductOption {
   /// Optional extra discount for taking the option with the main product.
   discountPercent Decimal? @db.Decimal(5, 2)
 
+  /// The option is ordered in exactly the main product's quantity — an
+  /// engraving on every cutter, a box per cutter. The customer types no
+  /// quantity for it; the cart and the inquiry basket keep it in step when the
+  /// main line changes. Off: the customer chooses the option's own quantity.
+  followsMainQuantity Boolean @default(false)
+
   createdAt DateTime @default(now())
 
   @@unique([productId, optionProductId])

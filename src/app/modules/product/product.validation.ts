@@ -181,6 +181,8 @@ const option = z.object({
 	groupLabel: z.string().trim().max(120).nullable().optional(),
 	preselected: z.boolean().default(false),
 	discountPercent: money.nullable().optional(),
+	/// Ordered in the main product's quantity; the customer types none for it.
+	followsMainQuantity: z.boolean().default(false),
 })
 
 const productBody = z.object({

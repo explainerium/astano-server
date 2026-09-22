@@ -14,6 +14,11 @@
 export interface EmailBranding {
 	/** Absolute URL of a logo shown in the header. Empty means the shop name as text. */
 	headerImage: string
+	/**
+	 * Behind the logo. White by default: the astano logo is black line-work on
+	 * transparent, and on the old dark band it was not there at all.
+	 */
+	headerBackgroundColour: string
 	/** Buttons and accents. */
 	baseColour: string
 	/** Behind the card. */
@@ -27,6 +32,7 @@ export interface EmailBranding {
 
 export const DEFAULT_BRANDING: EmailBranding = {
 	headerImage: "",
+	headerBackgroundColour: "#ffffff",
 	baseColour: "#272727",
 	backgroundColour: "#f5f5f5",
 	bodyBackgroundColour: "#ffffff",
@@ -60,8 +66,20 @@ const imageUrl = (value: unknown): string => {
 
 const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "")
 
-export const readBranding = (settings: Record<string, unknown>): EmailBranding => ({
-	headerImage: imageUrl(settings["email.headerImage"]),
+/**
+ * `defaultLogo` is the shop's own logo, used when no other is set — the client
+ * asked (22 September) for the logo at the top rather than "ASSCA GmbH", and a
+ * setting nobody has filled in yet should not be what stands in the way.
+ */
+export const readBranding = (
+	settings: Record<string, unknown>,
+	defaultLogo = ""
+): EmailBranding => ({
+	headerImage: imageUrl(settings["email.headerImage"]) || imageUrl(defaultLogo),
+	headerBackgroundColour: colour(
+		settings["email.headerBackgroundColour"],
+		DEFAULT_BRANDING.headerBackgroundColour
+	),
 	baseColour: colour(settings["email.baseColour"], DEFAULT_BRANDING.baseColour),
 	backgroundColour: colour(settings["email.backgroundColour"], DEFAULT_BRANDING.backgroundColour),
 	bodyBackgroundColour: colour(

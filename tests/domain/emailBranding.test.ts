@@ -46,6 +46,29 @@ describe("email branding", () => {
 		expect(readBranding({})).toEqual(DEFAULT_BRANDING)
 	})
 
+	/*
+	 * The client, 22 September: "we need our logo on top and not ASSCA GmbH".
+	 * The shop's own logo stands in until somebody sets another, and a logo set
+	 * in the dashboard still wins.
+	 */
+	it("uses the shop's logo when none is set, and the configured one when it is", () => {
+		const shopLogo = "https://shop.test/brand/astano-logo-email.png"
+
+		expect(readBranding({}, shopLogo).headerImage).toBe(shopLogo)
+		expect(readBranding({ "email.headerImage": "  " }, shopLogo).headerImage).toBe(shopLogo)
+		expect(
+			readBranding({ "email.headerImage": "https://cdn.test/other.png" }, shopLogo).headerImage
+		).toBe("https://cdn.test/other.png")
+		// A bad default is refused like a bad setting.
+		expect(readBranding({}, "javascript:alert(1)").headerImage).toBe("")
+	})
+
+	it("puts the logo on white unless told otherwise — the logo is black", () => {
+		expect(readBranding({}).headerBackgroundColour).toBe("#ffffff")
+		expect(readBranding({ "email.headerBackgroundColour": "#F5F5F5" }).headerBackgroundColour).toBe("#f5f5f5")
+		expect(readBranding({ "email.headerBackgroundColour": "url(x)" }).headerBackgroundColour).toBe("#ffffff")
+	})
+
 	describe("readableOn", () => {
 		it("puts white on dark and black on light", () => {
 			expect(readableOn("#272727")).toBe("#ffffff")

@@ -542,6 +542,7 @@ export const CONTENT_REGISTRY: Record<string, ContentDefinition> = {
 	"shop.optionProductBody": { group: "product", section: "Options", label: "Option product body", type: "textarea" },
 	"shop.optionsIntro": { group: "product", section: "Options", label: "Options intro", type: "textarea" },
 	"shop.optionsTierHint": { group: "product", section: "Options", label: "Options tier hint", type: "textarea" },
+	"shop.optionsIntroQuote": { group: "product", section: "Options", label: "Options intro on an inquiry product", type: "textarea" },
 }
 
 /** Whether this key may be written at all. The API's only authority on that. */

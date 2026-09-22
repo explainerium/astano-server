@@ -67,6 +67,44 @@ export const loadBundleDiscounts = async (
 	return result
 }
 
+/**
+ * Option lines whose option is set to follow the main product's quantity.
+ *
+ * Read from `ProductOption` on every call, like the discount above, so an
+ * admin ticking the box changes baskets that already exist. Shared by the cart
+ * and the inquiry basket: both keep such a line at its parent's quantity.
+ */
+export const loadFollowingLines = async (items: DiscountableLine[]): Promise<Set<string>> => {
+	const pairs = items
+		.filter((i) => i.parentItemId)
+		.map((line) => {
+			const parent = items.find((p) => p.id === line.parentItemId)
+			if (!parent) return null
+			return {
+				lineId: line.id,
+				ownerProductId: parent.variant.productId,
+				optionProductId: line.variant.productId,
+			}
+		})
+		.filter((p): p is NonNullable<typeof p> => p !== null)
+
+	if (!pairs.length) return new Set()
+
+	const rows = await prisma.productOption.findMany({
+		where: {
+			followsMainQuantity: true,
+			OR: pairs.map((p) => ({ productId: p.ownerProductId, optionProductId: p.optionProductId })),
+		},
+		select: { productId: true, optionProductId: true },
+	})
+
+	const following = new Set(rows.map((r) => `${r.productId}:${r.optionProductId}`))
+
+	return new Set(
+		pairs.filter((p) => following.has(`${p.ownerProductId}:${p.optionProductId}`)).map((p) => p.lineId)
+	)
+}
+
 /** Applies a bundle discount to an already-tiered unit price. */
 export const applyBundleDiscount = (unitPrice: Decimal, discount: Decimal): Decimal => {
 	const discounted = unitPrice.mul(new Decimal(100).minus(discount)).div(100)

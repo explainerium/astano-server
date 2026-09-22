@@ -9,6 +9,21 @@ export const addItemSchema = z.object({
 	}),
 })
 
+/**
+ * An inquiry product with the options ticked in the configurator — the same
+ * shape the cart's configurator takes, so the page posts one thing to either.
+ */
+export const addConfigurationSchema = z.object({
+	body: z.object({
+		variantId: z.string().uuid("A valid variant id is required"),
+		quantity: z.number().int().min(1).default(1),
+		options: z
+			.array(z.object({ variantId: z.string().uuid(), quantity: z.number().int().min(1) }))
+			.max(50)
+			.default([]),
+	}),
+})
+
 export const updateItemSchema = z.object({
 	params: z.object({ id: z.string().uuid() }),
 	body: z.object({
@@ -107,6 +122,7 @@ export const setFilesSchema = z.object({
 export const QuoteValidation = {
 	setFilesSchema,
 	addItemSchema,
+	addConfigurationSchema,
 	updateItemSchema,
 	itemIdSchema,
 	submitSchema,

@@ -39,6 +39,16 @@ const addItem: RequestHandler = catchAsync(async (req, res) => {
 	})
 })
 
+const addConfiguration: RequestHandler = catchAsync(async (req, res) => {
+	const { basket, token } = await QuoteService.addConfiguration(ownerOf(req), req.body, req.locale)
+	syncCookie(res, token)
+	sendResponse(res, {
+		statusCode: httpStatus.CREATED,
+		message: t("quote.added", req.locale),
+		data: basket,
+	})
+})
+
 const updateItem: RequestHandler = catchAsync(async (req, res) => {
 	const { basket, token, adjusted } = await QuoteService.updateItem(
 		ownerOf(req),
@@ -215,6 +225,7 @@ export const QuoteController = {
 	setBasketFiles,
 	getBasket,
 	addItem,
+	addConfiguration,
 	updateItem,
 	removeItem,
 	clearBasket,

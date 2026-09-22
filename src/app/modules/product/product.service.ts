@@ -448,6 +448,9 @@ const toPublicProduct = (
 				moq: optionMoq,
 				startQuantity: optionMoq > 0 ? optionMoq : 1,
 				discountPercent: o.discountPercent?.toString() ?? null,
+				/// Ordered in the main product's quantity: the page offers no
+				/// quantity field for it, and the cart and basket keep it in step.
+				followsMainQuantity: o.followsMainQuantity,
 				image: toImage(o.optionProduct.featuredAsset),
 				unitPrice:
 					resolvePrice({
@@ -612,6 +615,7 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 			sortOrder: o.sortOrder,
 			preselected: o.preselected,
 			discountPercent: o.discountPercent,
+			followsMainQuantity: o.followsMainQuantity,
 		})),
 		createdAt: row.createdAt,
 		updatedAt: row.updatedAt,
@@ -1378,6 +1382,7 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 					groupLabel: o.groupLabel ?? null,
 					preselected: o.preselected,
 					discountPercent: o.discountPercent ?? null,
+					followsMainQuantity: o.followsMainQuantity ?? false,
 				})),
 			},
 			variants: {
@@ -1505,6 +1510,7 @@ const duplicate = async (id: string, locale: LocaleCode, createdById?: string) =
 				groupLabel: o.groupLabel,
 				preselected: o.preselected,
 				discountPercent: o.discountPercent,
+				followsMainQuantity: o.followsMainQuantity,
 			})),
 
 			variants: row.variants.map((v) => ({
@@ -1679,6 +1685,7 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 						groupLabel: o.groupLabel ?? null,
 						preselected: o.preselected ?? false,
 						discountPercent: o.discountPercent ?? null,
+						followsMainQuantity: o.followsMainQuantity ?? false,
 					},
 				})
 			}

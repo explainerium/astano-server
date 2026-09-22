@@ -62,6 +62,8 @@ export interface PriceListReport {
 	articlesMatched: number
 	/** Articles in the file this shop does not sell. Ignored, not an error. */
 	articlesNotInShop: string[]
+	/// The articles the import was limited to; empty when it took the whole file.
+	onlySkus: string[]
 	laddersWritten: Record<string, number>
 	rungsWritten: number
 	quoteOnlyProducts: string[]
@@ -83,8 +85,27 @@ const skuIndex = async (skus: string[]): Promise<Map<string, { productId: string
 	)
 }
 
-const analyse = async (csv: string, delimiter?: string): Promise<AnalysePriceListResult> => {
-	const parsed = parsePriceList(csv, delimiter)
+/**
+ * Keeps only the rows for the articles asked for.
+ *
+ * The client, 22 September: "can I try it on only one product?" — a first
+ * import of a 12,899-row file is a lot to trust at once. Matched without regard
+ * to case, because an article number typed by hand is the one most likely to
+ * differ in it. Empty means every article, as before.
+ */
+const onlyThese = (rows: ParsedPriceList["rows"], onlySkus: string[] | undefined) => {
+	if (!onlySkus?.length) return rows
+	const wanted = new Set(onlySkus.map((sku) => sku.trim().toUpperCase()).filter(Boolean))
+	return rows.filter((row) => row.sku && wanted.has(row.sku.trim().toUpperCase()))
+}
+
+const analyse = async (
+	csv: string,
+	delimiter?: string,
+	onlySkus?: string[]
+): Promise<AnalysePriceListResult> => {
+	const whole = parsePriceList(csv, delimiter)
+	const parsed = { ...whole, rows: onlyThese(whole.rows, onlySkus) }
 	const articles = [...new Set(parsed.rows.map((row) => row.sku).filter(Boolean))]
 	const known = await skuIndex(articles)
 
@@ -108,9 +129,10 @@ const analyse = async (csv: string, delimiter?: string): Promise<AnalysePriceLis
 
 const runImport = async (
 	csv: string,
-	params: { delimiter?: string; dryRun: boolean }
+	params: { delimiter?: string; dryRun: boolean; onlySkus?: string[] }
 ): Promise<PriceListReport> => {
-	const parsed = parsePriceList(csv, params.delimiter)
+	const whole = parsePriceList(csv, params.delimiter)
+	const parsed = { ...whole, rows: onlyThese(whole.rows, params.onlySkus) }
 	const plans = planLadders(parsed.rows)
 
 	const articles = [...new Set(parsed.rows.map((row) => row.sku).filter(Boolean))]
@@ -123,6 +145,7 @@ const runImport = async (
 		articlesInFile: articles.length,
 		articlesMatched: known.size,
 		articlesNotInShop: articles.filter((sku) => !known.has(sku)),
+		onlySkus: params.onlySkus ?? [],
 		laddersWritten: {},
 		rungsWritten: 0,
 		quoteOnlyProducts: [],

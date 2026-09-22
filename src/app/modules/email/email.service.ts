@@ -2,6 +2,7 @@ import type { LocaleCode } from "../../../config/locales"
 import { prisma } from "../../../shared/prisma"
 import { httpStatus } from "../../../shared/httpStatus"
 import { interpolate, t } from "../../../i18n"
+import { env } from "../../../config"
 import { readBranding, type EmailBranding } from "../../../domain/email/branding"
 import { captureMail, mailContext } from "../../../helpers/mailer/context"
 import { esc } from "../../../helpers/mailer/layout"
@@ -79,7 +80,7 @@ const prepare = async (
 				: null
 
 	return {
-		branding: readBranding(settings),
+		branding: readBranding(settings, DEFAULT_LOGO),
 		subject: override.subject ? interpolate(override.subject, vars) : null,
 		heading: override.heading ? interpolate(override.heading, vars) : null,
 		additionalContent: override.additionalContent,
@@ -90,8 +91,18 @@ const prepare = async (
 	}
 }
 
-/** Branding alone, for the two account mails that compose their own layout. */
-const branding = async (): Promise<EmailBranding> => readBranding(await SettingService.getMap())
+/**
+ * The astano logo, served by the storefront from `public/brand`.
+ *
+ * A PNG on white rather than a media-library image: the library stores WebP,
+ * which Outlook for Windows does not display, and a German B2B inbox is very
+ * often Outlook. An absolute URL, because an inbox resolves nothing relative.
+ */
+const DEFAULT_LOGO = `${env.SHOP_BASE_URL}/brand/astano-logo-email.png`
+
+/** Branding alone, for the mails that compose their own layout. */
+const branding = async (): Promise<EmailBranding> =>
+	readBranding(await SettingService.getMap(), DEFAULT_LOGO)
 
 const list = async () => {
 	const { settings } = await load()

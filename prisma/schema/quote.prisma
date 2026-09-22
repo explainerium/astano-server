@@ -65,6 +65,13 @@ model QuoteBasketItem {
 
   quantity Int
 
+  /// Set on lines added as an option alongside a main product, as on the cart.
+  /// An inquiry product configured with an engraving and a box is one enquiry,
+  /// not three unrelated lines — and removing the product removes its options.
+  parentItemId String?
+  parentItem   QuoteBasketItem?  @relation("QuoteBasketOptionLines", fields: [parentItemId], references: [id], onDelete: Cascade)
+  optionLines  QuoteBasketItem[] @relation("QuoteBasketOptionLines")
+
   /// What the customer wants for this specific line — engraving text, a
   /// material preference, a deadline.
   note String?
@@ -85,6 +92,7 @@ model QuoteBasketItem {
   /// one into a unique-violation the customer saw as "duplicate entry".
   @@index([basketId])
   @@index([basketId, variantId])
+  @@index([parentItemId])
   @@map("quote_basket_items")
 }
 
@@ -181,6 +189,14 @@ model QuoteRequestItem {
   variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
   productId String?
 
+  /// The main line this option was requested with. Frozen like the rest, so
+  /// staff read "engraving for the cutter above" rather than a loose line.
+  /// SetNull rather than Cascade: a request's lines are a record, and no
+  /// delete of one may take another with it.
+  parentItemId String?
+  parentItem   QuoteRequestItem?  @relation("QuoteRequestOptionLines", fields: [parentItemId], references: [id], onDelete: SetNull)
+  optionLines  QuoteRequestItem[] @relation("QuoteRequestOptionLines")
+
   // Frozen at submission.
   sku        String
   name       String
@@ -199,6 +215,7 @@ model QuoteRequestItem {
   files QuoteRequestItemFile[]
 
   @@index([quoteId])
+  @@index([parentItemId])
   @@map("quote_request_items")
 }
 

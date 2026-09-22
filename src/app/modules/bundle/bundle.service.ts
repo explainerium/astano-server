@@ -97,7 +97,9 @@ interface Selection {
 const loadConfiguration = async (
 	variantId: string,
 	options: Selection[],
-	locale: LocaleCode
+	locale: LocaleCode,
+	/// The main line's quantity, which an option set to follow it is ordered in.
+	mainQuantity: number
 ) => {
 	const main = await prisma.productVariant.findUnique({
 		where: { id: variantId },
@@ -120,12 +122,16 @@ const loadConfiguration = async (
 		orderBy: { sortOrder: "asc" },
 	})
 
-	const offeredVariants = new Map<string, { variant: VariantRow; discountPercent: string | null }>()
+	const offeredVariants = new Map<
+		string,
+		{ variant: VariantRow; discountPercent: string | null; followsMainQuantity: boolean }
+	>()
 	for (const o of offered) {
 		for (const v of o.optionProduct.variants) {
 			offeredVariants.set(v.id, {
 				variant: v as VariantRow,
 				discountPercent: o.discountPercent?.toString() ?? null,
+				followsMainQuantity: o.followsMainQuantity,
 			})
 		}
 	}
@@ -157,7 +163,14 @@ const loadConfiguration = async (
 
 		chosen.push({
 			variant: entry.variant,
-			quantity: sel.quantity,
+			/*
+			 * An option set to follow the main product is ordered in its quantity,
+			 * whatever was posted. The page sends the same number, but a number
+			 * the page sends is a number anybody can send, and the reason this
+			 * switch exists is quotes that could not be made from the quantities
+			 * customers typed.
+			 */
+			quantity: entry.followsMainQuantity ? mainQuantity : sel.quantity,
 			discountPercent: entry.discountPercent,
 		})
 	}
@@ -198,7 +211,8 @@ const price = async (
 	const { main, offered, chosen } = await loadConfiguration(
 		payload.variantId,
 		payload.options,
-		locale
+		locale,
+		payload.quantity
 	)
 
 	const external = await externalTiersFor(ctx, [
@@ -235,6 +249,7 @@ const price = async (
 					startQuantity: startingQuantityFor(o.optionProduct.moq, v.moq),
 					moq: o.optionProduct.moq,
 					discountPercent: o.discountPercent?.toString() ?? null,
+					followsMainQuantity: o.followsMainQuantity,
 				}))
 		),
 	}
@@ -253,7 +268,12 @@ const addToCart = async (
 	payload: { variantId: string; quantity: number; options: Selection[] },
 	locale: LocaleCode
 ) => {
-	const { main, chosen } = await loadConfiguration(payload.variantId, payload.options, locale)
+	const { main, chosen } = await loadConfiguration(
+		payload.variantId,
+		payload.options,
+		locale,
+		payload.quantity
+	)
 
 	const external = await externalTiersFor(ctx, [
 		main.productId,

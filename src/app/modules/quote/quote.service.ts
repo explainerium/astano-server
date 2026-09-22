@@ -22,6 +22,8 @@ import {
 	readInquiryArtworkRules,
 } from "../../../domain/product/artwork"
 import { ArtworkService } from "../media/artwork.service"
+import { BundleService } from "../bundle/bundle.service"
+import { loadFollowingLines } from "../cart/bundleDiscount"
 import ApiError from "../../errors/ApiError"
 import { GUEST_BASKET_TTL_DAYS } from "./quote.constant"
 
@@ -79,8 +81,8 @@ const formatNumber = (n: number): string => `RFQ-${String(n).padStart(6, "0")}`
 
 // ── basket ───────────────────────────────────────────────────────────────────
 
-const basketView = (basket: BasketRow, locale: LocaleCode) => {
-	const items = basket.items.map((i) => {
+const basketView = (basket: BasketRow, locale: LocaleCode, following: Set<string> = new Set()) => {
+	const build = (i: BasketRow["items"][number]) => {
 		const product = i.variant.product
 		const t = pick(product.translations, locale)
 		const moq = getEffectiveMoq({ productMoq: product.moq, variantMoq: i.variant.moq })
@@ -97,6 +99,8 @@ const basketView = (basket: BasketRow, locale: LocaleCode) => {
 			),
 			image: image ? { id: image.id, url: storage.publicUrl(image.storageKey) } : null,
 			quantity: i.quantity,
+			/// An option ordered in its parent's quantity; no stepper of its own.
+			followsMain: following.has(i.id),
 			note: i.note,
 			files: i.files.map((f) => ArtworkService.toFile(f.asset)),
 			moq,
@@ -109,15 +113,28 @@ const basketView = (basket: BasketRow, locale: LocaleCode) => {
 			artworkMissing:
 				checkArtworkComplete(readInquiryArtworkRules(product), i.files.length)?.kind === "REQUIRED",
 		}
-	})
+	}
 
-	const belowMoq = items.some((i) => i.belowMoq)
-	const artworkMissing = items.some((i) => i.artworkMissing)
+	// Option lines are nested under the product they were configured with, as
+	// in the cart. An option whose parent is somehow gone is listed on its own
+	// rather than dropped — a line the customer cannot see is one they cannot
+	// remove.
+	const ids = new Set(basket.items.map((i) => i.id))
+	const items = basket.items
+		.filter((i) => !i.parentItemId || !ids.has(i.parentItemId))
+		.map((i) => ({
+			...build(i),
+			options: basket.items.filter((o) => o.parentItemId === i.id).map(build),
+		}))
+
+	const every = items.flatMap((i) => [i, ...i.options])
+	const belowMoq = every.some((i) => i.belowMoq)
+	const artworkMissing = every.some((i) => i.artworkMissing)
 
 	return {
 		id: basket.id,
 		items,
-		itemCount: items.reduce((n, i) => n + i.quantity, 0),
+		itemCount: every.reduce((n, i) => n + i.quantity, 0),
 		lineCount: items.length,
 		issues: [
 			...(belowMoq ? ["BELOW_MOQ"] : []),
@@ -169,8 +186,8 @@ const resolveBasket = async (
 					 * quietly lost the one thing the request was about. Nobody notices
 					 * until staff ask what shape it is supposed to be.
 					 *
-					 * A basket line never has options, so the plan's copies are always
-					 * top-level; the shape is shared with the cart because the rule is.
+					 * Options configured with an inquiry product travel with it, parents
+					 * before their options, exactly as the cart's do.
 					 */
 					const plan = planMerge(
 						guest.items.map((i) => ({
@@ -178,12 +195,14 @@ const resolveBasket = async (
 							variantId: i.variantId,
 							quantity: i.quantity,
 							fileCount: i.files.length,
+							parentItemId: i.parentItemId,
 						})),
 						mine.items.map((i) => ({
 							id: i.id,
 							variantId: i.variantId,
 							quantity: i.quantity,
 							fileCount: i.files.length,
+							parentItemId: i.parentItemId,
 						}))
 					)
 
@@ -200,14 +219,19 @@ const resolveBasket = async (
 							})
 						}
 
+						const moved = new Map<string, string>()
+
 						for (const step of plan.copies) {
 							const item = guestItems.get(step.source.id)!
 
-							await tx.quoteBasketItem.create({
+							const created = await tx.quoteBasketItem.create({
 								data: {
 									basketId: mine!.id,
 									variantId: item.variantId,
 									quantity: item.quantity,
+									parentItemId: step.parentSourceId
+										? (moved.get(step.parentSourceId) ?? null)
+										: null,
 									note: item.note,
 									files: {
 										create: item.files.map((f, index) => ({
@@ -217,6 +241,8 @@ const resolveBasket = async (
 									},
 								},
 							})
+
+							moved.set(item.id, created.id)
 						}
 
 						await tx.quoteBasket.delete({ where: { id: guest.id } })
@@ -260,12 +286,12 @@ const resolveBasket = async (
 
 const reload = async (id: string, locale: LocaleCode) => {
 	const fresh = await prisma.quoteBasket.findUnique({ where: { id }, include: basketInclude })
-	return basketView(fresh!, locale)
+	return basketView(fresh!, locale, await loadFollowingLines(fresh!.items))
 }
 
 const getBasket = async (owner: BasketOwner, locale: LocaleCode) => {
 	const { basket, token } = await resolveBasket(owner)
-	return { basket: basketView(basket, locale), token }
+	return { basket: basketView(basket, locale, await loadFollowingLines(basket.items)), token }
 }
 
 const addItem = async (
@@ -302,10 +328,17 @@ const addItem = async (
 
 	const assetIds = payload.assetIds ?? []
 
-	// Same rule as the cart: a line carrying a drawing is its own line.
+	// Same rule as the cart: a line carrying a drawing is its own line, and so
+	// is one configured with options — or an option line itself.
 	const existing = assetIds.length
 		? undefined
-		: basket.items.find((i) => i.variantId === payload.variantId && i.files.length === 0)
+		: basket.items.find(
+				(i) =>
+					i.variantId === payload.variantId &&
+					i.files.length === 0 &&
+					!i.parentItemId &&
+					!basket.items.some((o) => o.parentItemId === i.id)
+			)
 
 	if (existing) {
 		await prisma.quoteBasketItem.update({
@@ -340,6 +373,73 @@ const addItem = async (
 	return { basket: await reload(basket.id, locale), token }
 }
 
+/**
+ * An inquiry product with the options the customer ticked, in one go.
+ *
+ * The product page used to send only the product: an inquiry configured with an
+ * engraving and a box reached staff as a bare product, the options silently
+ * gone. Written in one transaction, like the cart's configurator, so the
+ * product never arrives without what it was configured with.
+ *
+ * Checked by the configurator's own loader — every option must genuinely be
+ * offered with this product, and one that follows the main quantity is ordered
+ * in it whatever was posted — and against each line's minimum, which is the
+ * basket's first gate (R4). No price is asked for: that is the point of an
+ * inquiry.
+ */
+const addConfiguration = async (
+	owner: BasketOwner,
+	payload: { variantId: string; quantity: number; options: { variantId: string; quantity: number }[] },
+	locale: LocaleCode
+) => {
+	const { basket, token } = await resolveBasket(owner)
+
+	const { main, chosen } = await BundleService.loadConfiguration(
+		payload.variantId,
+		payload.options,
+		locale,
+		payload.quantity
+	)
+
+	for (const line of [
+		{ variant: main, quantity: payload.quantity },
+		...chosen.map((option) => ({ variant: option.variant, quantity: option.quantity })),
+	]) {
+		const moq = getEffectiveMoq({ productMoq: line.variant.product.moq, variantMoq: line.variant.moq })
+		if (isBelowMoq(line.quantity, moq)) {
+			throw new ApiError(httpStatus.BAD_REQUEST, "Below the minimum order quantity", {
+				messageKey: "quote.belowMoq",
+				messageVars: { moq: String(moq), quantity: String(line.quantity) },
+			})
+		}
+	}
+
+	await prisma.$transaction(async (tx) => {
+		const parent = await tx.quoteBasketItem.create({
+			data: { basketId: basket.id, variantId: main.id, quantity: payload.quantity },
+		})
+
+		for (const option of chosen) {
+			await tx.quoteBasketItem.create({
+				data: {
+					basketId: basket.id,
+					variantId: option.variant.id,
+					quantity: option.quantity,
+					// Cascades, so removing the product removes its options.
+					parentItemId: parent.id,
+				},
+			})
+		}
+
+		await tx.quoteBasket.update({
+			where: { id: basket.id },
+			data: { expiresAt: basket.userId ? null : expiry() },
+		})
+	})
+
+	return { basket: await reload(basket.id, locale), token }
+}
+
 const updateItem = async (
 	owner: BasketOwner,
 	itemId: string,
@@ -360,6 +460,24 @@ const updateItem = async (
 		return { basket: await reload(basket.id, locale), token, adjusted: false }
 	}
 
+	const following = await loadFollowingLines(basket.items)
+
+	// An option that follows its product keeps the product's quantity; its note
+	// is still the customer's to write.
+	if (following.has(item.id)) {
+		const parent = basket.items.find((i) => i.id === item.parentItemId)
+
+		await prisma.quoteBasketItem.update({
+			where: { id: itemId },
+			data: {
+				quantity: parent?.quantity ?? item.quantity,
+				...(payload.note !== undefined ? { note: payload.note } : {}),
+			},
+		})
+
+		return { basket: await reload(basket.id, locale), token, adjusted: false }
+	}
+
 	const moq = getEffectiveMoq({
 		productMoq: item.variant.product.moq,
 		variantMoq: item.variant.moq,
@@ -368,10 +486,23 @@ const updateItem = async (
 	// R4, gate 2 of 3: raise on update, and say so.
 	const { quantity, adjusted } = applyMoqFloor(payload.quantity, moq)
 
-	await prisma.quoteBasketItem.update({
-		where: { id: itemId },
-		data: { quantity, ...(payload.note !== undefined ? { note: payload.note } : {}) },
-	})
+	const followers = basket.items.filter((i) => i.parentItemId === item.id && following.has(i.id))
+
+	await prisma.$transaction([
+		prisma.quoteBasketItem.update({
+			where: { id: itemId },
+			data: { quantity, ...(payload.note !== undefined ? { note: payload.note } : {}) },
+		}),
+		// Options that follow this product move with it.
+		...(followers.length
+			? [
+					prisma.quoteBasketItem.updateMany({
+						where: { id: { in: followers.map((f) => f.id) } },
+						data: { quantity },
+					}),
+				]
+			: []),
+	])
 
 	return { basket: await reload(basket.id, locale), token, adjusted }
 }
@@ -385,6 +516,7 @@ const removeItem = async (owner: BasketOwner, itemId: string, locale: LocaleCode
 		})
 	}
 
+	// Option lines cascade with their product — the database FK handles it.
 	await prisma.quoteBasketItem.delete({ where: { id: itemId } })
 	return { basket: await reload(basket.id, locale), token }
 }
@@ -396,6 +528,19 @@ const clearBasket = async (owner: BasketOwner, locale: LocaleCode) => {
 }
 
 // ── submission ───────────────────────────────────────────────────────────────
+
+/**
+ * Each product followed by its options, so every reader — the thread, the
+ * dashboard, both mails — shows an engraving directly under its cutter.
+ */
+const groupedLines = <T extends { id: string; parentItemId: string | null }>(items: T[]): T[] => {
+	const ids = new Set(items.map((i) => i.id))
+	const isOption = (i: T) => !!i.parentItemId && ids.has(i.parentItemId)
+
+	return items
+		.filter((i) => !isOption(i))
+		.flatMap((parent) => [parent, ...items.filter((o) => o.parentItemId === parent.id)])
+}
 
 const quoteView = (row: QuoteRow, opts: { staff?: boolean } = {}) => ({
 	id: row.id,
@@ -430,8 +575,10 @@ const quoteView = (row: QuoteRow, opts: { staff?: boolean } = {}) => ({
 	currency: row.quotedCurrency,
 	submittedAt: row.submittedAt,
 	answeredAt: row.answeredAt,
-	items: row.items.map((i) => ({
+	items: groupedLines(row.items).map((i) => ({
 		id: i.id,
+		/// The product line this option was asked for with; null for a product.
+		parentItemId: i.parentItemId,
 		sku: i.sku,
 		name: i.name,
 		attributes: i.attributes,
@@ -618,7 +765,14 @@ const submit = async (
 				contactPhone: payload.contactPhone ?? owner.user?.phone ?? null,
 				contactCompany: payload.contactCompany ?? owner.user?.company ?? null,
 				accessTokenHash: accessToken ? hashToken(accessToken) : null,
-				title: payload.title?.trim() || titleFromBasket(basket.items, locale),
+				// Named from the products, not their options: "Ausstecher +2" should
+				// count the things enquired about, not the engraving on each.
+				title:
+					payload.title?.trim() ||
+					titleFromBasket(
+						basket.items.filter((i) => !i.parentItemId),
+						locale
+					),
 				message: payload.message ?? null,
 
 				contactSalutation: payload.contactSalutation ?? null,
@@ -630,37 +784,6 @@ const submit = async (
 				contactCity: payload.contactCity ?? null,
 				contactCountryCode: payload.contactCountryCode ?? null,
 				locale,
-				items: {
-					create: basket.items.map((item) => ({
-						variantId: item.variantId,
-						productId: item.variant.productId,
-						// Empty, not null: the snapshot column is non-null and a real
-						// SKU is never blank, so "" unambiguously records "had none
-						// at the time".
-						sku: item.variant.sku ?? "",
-						name:
-							pick(item.variant.product.translations, locale)?.name ??
-							item.variant.sku ??
-							"(untitled)",
-						attributes: item.variant.attributeValues.map(
-							(av) =>
-								pick(av.attributeValue.translations, locale)?.label ?? av.attributeValue.code
-						),
-						quantity: item.quantity,
-						moqAtSubmission: getEffectiveMoq({
-							productMoq: item.variant.product.moq,
-							variantMoq: item.variant.moq,
-						}),
-						note: item.note,
-						files: {
-							create: item.files.map((f, index) => ({
-								assetId: f.assetId,
-								fileName: f.asset.originalName,
-								sortOrder: index,
-							})),
-						},
-					})),
-				},
 				...(payload.message
 					? {
 							messages: {
@@ -670,6 +793,53 @@ const submit = async (
 					: {}),
 			},
 		})
+
+		/*
+		 * The lines, frozen. One at a time and parents first, so an option keeps
+		 * pointing at the product it was asked for with — a nested create cannot
+		 * point one row at a sibling it is creating in the same call.
+		 */
+		const requestLineFor = new Map<string, string>()
+		const basketIds = new Set(basket.items.map((i) => i.id))
+		const isOption = (i: BasketRow["items"][number]) => !!i.parentItemId && basketIds.has(i.parentItemId)
+
+		for (const item of [...basket.items.filter((i) => !isOption(i)), ...basket.items.filter(isOption)]) {
+			const line = await tx.quoteRequestItem.create({
+				data: {
+					quoteId: quote.id,
+					parentItemId: isOption(item) ? (requestLineFor.get(item.parentItemId!) ?? null) : null,
+					variantId: item.variantId,
+					productId: item.variant.productId,
+					// Empty, not null: the snapshot column is non-null and a real
+					// SKU is never blank, so "" unambiguously records "had none
+					// at the time".
+					sku: item.variant.sku ?? "",
+					name:
+						pick(item.variant.product.translations, locale)?.name ??
+						item.variant.sku ??
+						"(untitled)",
+					attributes: item.variant.attributeValues.map(
+						(av) =>
+							pick(av.attributeValue.translations, locale)?.label ?? av.attributeValue.code
+					),
+					quantity: item.quantity,
+					moqAtSubmission: getEffectiveMoq({
+						productMoq: item.variant.product.moq,
+						variantMoq: item.variant.moq,
+					}),
+					note: item.note,
+					files: {
+						create: item.files.map((f, index) => ({
+							assetId: f.assetId,
+							fileName: f.asset.originalName,
+							sortOrder: index,
+						})),
+					},
+				},
+			})
+
+			requestLineFor.set(item.id, line.id)
+		}
 
 		await tx.quoteBasketItem.deleteMany({ where: { basketId: basket.id } })
 		return quote
@@ -707,7 +877,11 @@ const submit = async (
 		message: full!.message,
 	}
 
-	const items = view.items.map((i) => ({ name: i.name, quantity: i.quantity }))
+	// An option reads as belonging to the product above it in both mails.
+	const items = view.items.map((i) => ({
+		name: i.parentItemId ? `+ ${i.name}` : i.name,
+		quantity: i.quantity,
+	}))
 
 	/*
 	 * The drawings, ready to travel with the notification.
@@ -991,6 +1165,7 @@ const expireOverdue = async (now = new Date()): Promise<number> => {
 export const QuoteService = {
 	getBasket,
 	addItem,
+	addConfiguration,
 	updateItem,
 	removeItem,
 	clearBasket,

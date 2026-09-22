@@ -21,7 +21,7 @@ import { prisma } from "../../../shared/prisma"
 import { generateToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
 import { GUEST_CART_TTL_DAYS } from "./cart.constant"
-import { applyBundleDiscount, loadBundleDiscounts } from "./bundleDiscount"
+import { applyBundleDiscount, loadBundleDiscounts, loadFollowingLines } from "./bundleDiscount"
 import { loadExternalTiers, type ExternalTiers } from "../product/tierSources"
 
 const cartInclude = {
@@ -129,7 +129,8 @@ const view = (
 	role: PricingRole,
 	bundleDiscounts?: Map<string, Decimal>,
 	externalTiers?: (productId: string) => ExternalTiers,
-	stockRules: StockRules = DEFAULT_STOCK_RULES
+	stockRules: StockRules = DEFAULT_STOCK_RULES,
+	following: Set<string> = new Set()
 ) => {
 	const lines = cart.items
 		// Option lines are nested under their parent rather than listed flat.
@@ -154,6 +155,9 @@ const view = (
 					),
 					image: image ? { id: image.id, url: storage.publicUrl(image.storageKey) } : null,
 					quantity: i.quantity,
+					/// An option ordered in its parent's quantity. The cart shows no
+					/// stepper for it; changing the parent changes it.
+					followsMain: following.has(i.id),
 					moq,
 					belowMoq: isBelowMoq(i.quantity, moq),
 					// The drawing this line is to be made from. Ordered as the customer
@@ -409,7 +413,7 @@ const readAndPrice = async (
 	 * resolved line by line — and loading per line would turn a twenty-line cart
 	 * into forty queries.
 	 */
-	const [bundleDiscounts, externalTiers, rules] = await Promise.all([
+	const [bundleDiscounts, externalTiers, rules, following] = await Promise.all([
 		loadBundleDiscounts(cart.items),
 		loadExternalTiers({
 			productIds: [...new Set(cart.items.map((i) => i.variant.productId))],
@@ -419,9 +423,10 @@ const readAndPrice = async (
 			withCategoryQuantities: true,
 		}),
 		stockRules ? Promise.resolve(stockRules) : SettingService.getMap().then(readStockRules),
+		loadFollowingLines(cart.items),
 	])
 
-	return view(cart, locale, role, bundleDiscounts, externalTiers, rules)
+	return view(cart, locale, role, bundleDiscounts, externalTiers, rules, following)
 }
 
 const get = async (owner: CartOwner, locale: LocaleCode) => {
@@ -471,11 +476,35 @@ const addItem = async (
 	 * charges for it anyway. A line the customer can be billed for and cannot
 	 * see is worth one lookup to prevent.
 	 */
-	if (payload.parentItemId && !cart.items.some((i) => i.id === payload.parentItemId)) {
+	const parent = payload.parentItemId
+		? cart.items.find((i) => i.id === payload.parentItemId)
+		: undefined
+
+	if (payload.parentItemId && !parent) {
 		throw new ApiError(httpStatus.NOT_FOUND, "That line is not in your cart", {
 			messageKey: "cart.itemNotFound",
 		})
 	}
+
+	/*
+	 * An option set to follow its product is added in the product's quantity,
+	 * whatever was posted — the configurator is not the only way to reach this.
+	 */
+	const follows = parent
+		? ((
+				await prisma.productOption.findUnique({
+					where: {
+						productId_optionProductId: {
+							productId: parent.variant.productId,
+							optionProductId: variant.productId,
+						},
+					},
+					select: { followsMainQuantity: true },
+				})
+			)?.followsMainQuantity ?? false)
+		: false
+
+	if (follows && parent) payload = { ...payload, quantity: parent.quantity }
 
 	const moq = getEffectiveMoq({ productMoq: variant.product.moq, variantMoq: variant.moq })
 
@@ -504,7 +533,9 @@ const addItem = async (
 					i.files.length === 0
 			)
 
-	const newQuantity = (existing?.quantity ?? 0) + payload.quantity
+	// A following option never adds up past its product: it is the product's
+	// quantity, however many times it is added.
+	const newQuantity = follows ? payload.quantity : (existing?.quantity ?? 0) + payload.quantity
 
 	const stockRules = readStockRules(await SettingService.getMap())
 
@@ -567,6 +598,21 @@ const updateItem = async (
 		return { cart: await readAndPrice(cart.id, owner, locale), token, adjusted: false }
 	}
 
+	const following = await loadFollowingLines(cart.items)
+
+	/*
+	 * An option that follows its main product takes the main line's quantity,
+	 * whatever was asked for. Removing it (0, above) is still the customer's
+	 * choice; ordering a different number of it is not.
+	 */
+	if (following.has(item.id)) {
+		const parent = cart.items.find((i) => i.id === item.parentItemId)
+		if (parent && parent.quantity !== item.quantity) {
+			await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: parent.quantity } })
+		}
+		return { cart: await readAndPrice(cart.id, owner, locale), token, adjusted: false }
+	}
+
 	const moq = getEffectiveMoq({
 		productMoq: item.variant.product.moq,
 		variantMoq: item.variant.moq,
@@ -586,7 +632,22 @@ const updateItem = async (
 		})
 	}
 
-	await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: finalQuantity } })
+	const followers = cart.items.filter((i) => i.parentItemId === item.id && following.has(i.id))
+
+	await prisma.$transaction([
+		prisma.cartItem.update({ where: { id: itemId }, data: { quantity: finalQuantity } }),
+		// Options that follow this line move with it. Their stock and minimum are
+		// reported on the cart rather than refused here — the main line is what
+		// the customer changed, and refusing it for an option would read wrong.
+		...(followers.length
+			? [
+					prisma.cartItem.updateMany({
+						where: { id: { in: followers.map((f) => f.id) } },
+						data: { quantity: finalQuantity },
+					}),
+				]
+			: []),
+	])
 
 	return { cart: await readAndPrice(cart.id, owner, locale, stockRules), token, adjusted }
 }

@@ -403,9 +403,16 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 	// ── Email appearance ───────────────────────────────────────────────────
 	"email.headerImage": {
 		label: "Header logo URL",
-		help: "Shown at the top of every email. Must be a full https:// address — an inbox cannot resolve a path from your own site. Leave empty to print the company name instead.",
+		help: "Leave empty to use the astano logo. To use a different one, paste a full https:// address of a PNG or JPG — Outlook for Windows does not show WebP, which is what the media library stores.",
 		type: "text",
 		fallback: "",
+		group: "email",
+	},
+	"email.headerBackgroundColour": {
+		label: "Header background",
+		help: "Behind the logo at the top of every email. The astano logo is black, so keep this light.",
+		type: "color",
+		fallback: "#ffffff",
 		group: "email",
 	},
 	"email.baseColour": {

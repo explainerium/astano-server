@@ -25,11 +25,28 @@ const readUpload = (file: Express.Multer.File | undefined): string => {
 	return decodeCsvBuffer(file.buffer).text
 }
 
+/**
+ * "1-FSI1-L, 1-ESH-1" — the articles to limit an import to, as the form sends
+ * them: one text field, split on commas, semicolons, spaces or new lines.
+ */
+const readOnlySkus = (value: unknown): string[] | undefined => {
+	if (typeof value !== "string") return undefined
+	const skus = value
+		.split(/[\s,;]+/)
+		.map((sku) => sku.trim())
+		.filter(Boolean)
+	return skus.length ? skus : undefined
+}
+
 const analyse: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, {
 		statusCode: httpStatus.OK,
 		message: t("common.ok", req.locale),
-		data: await PriceListIoService.analyse(readUpload(req.file), req.body.delimiter || undefined),
+		data: await PriceListIoService.analyse(
+			readUpload(req.file),
+			req.body.delimiter || undefined,
+			readOnlySkus(req.body.onlySkus)
+		),
 	})
 })
 
@@ -37,6 +54,7 @@ const run: RequestHandler = catchAsync(async (req, res) => {
 	const report = await PriceListIoService.runImport(readUpload(req.file), {
 		delimiter: req.body.delimiter || undefined,
 		dryRun: req.body.dryRun === "true" || req.body.dryRun === true,
+		onlySkus: readOnlySkus(req.body.onlySkus),
 	})
 
 	const count = Object.values(report.laddersWritten).reduce((sum, n) => sum + n, 0)

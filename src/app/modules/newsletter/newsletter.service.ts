@@ -8,6 +8,7 @@ import { logger } from "../../../shared/logger"
 import { prisma } from "../../../shared/prisma"
 import { generateToken, hashToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
+import { EmailService } from "../email/email.service"
 import { SettingService } from "../setting/setting.service"
 
 /**
@@ -31,6 +32,8 @@ const sendConfirmation = async (
 	token: string
 ): Promise<void> => {
 	const company = await SettingService.getCompany()
+	// The same logo and colours as every other mail the shop sends.
+	const branding = await EmailService.branding()
 	const L = (key: string, vars?: Record<string, string | number>) => t(key, locale, vars)
 
 	const title = L("newsletter.confirm.title")
@@ -46,6 +49,7 @@ const sendConfirmation = async (
 				intro,
 				bodyHtml: `<p style="margin:0;font-size:13px;color:#777;">${L("newsletter.confirm.ignore")}</p>`,
 				company,
+				branding,
 				action: { label: L("newsletter.confirm.action"), url: confirmUrl },
 			}),
 			text: toPlainText(title, intro, [confirmUrl]),

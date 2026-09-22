@@ -160,8 +160,10 @@ describe("contentRegistry — shape", () => {
 	const entries = Object.entries(CONTENT_REGISTRY)
 
 	/*
-	 * 250: the 232 marketing strings and pictures, plus 18 search titles and
-	 * descriptions — nine indexed pages, a pair each.
+	 * 251: the 232 marketing strings and pictures, plus 18 search titles and
+	 * descriptions — nine indexed pages, a pair each — plus the options intro
+	 * an inquiry product shows, the twin of `shop.optionsIntro` (22 September).
+	 * The buy buttons stay out: chrome, as CONTENT-PLAN.md decided.
 	 *
 	 * 232 was itself down from the first pass's 234. Both losses were the same
 	 * mistake found twice: a key offered as editable that no component reads, so
@@ -171,7 +173,7 @@ describe("contentRegistry — shape", () => {
 	 */
 	it("covers every editable string and picture", () => {
 		const images = entries.filter(([, d]) => d.type === "image")
-		expect(entries).toHaveLength(250)
+		expect(entries).toHaveLength(251)
 		expect(images).toHaveLength(33)
 	})
 

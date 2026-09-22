@@ -325,31 +325,51 @@ export const convertQuoteToOrder = async (input: ConvertInput) => {
 						},
 					],
 				},
-				items: {
-					create: priced.map((i) => ({
-						variantId: i.variantId,
-						productId: i.productId,
-						sku: i.sku,
-						name: i.name,
-						attributes: i.attributes,
-						quantity: i.quantity,
-						// The agreed price, not today's catalogue price.
-						unitPrice: i.quotedUnitPrice!.toString(),
-						lineTotal: i.quotedLineTotal!.toString(),
-						// The drawing follows the line onto the order. It was frozen once
-						// at submission; this copies that record rather than re-reading
-						// the upload, which may since have been deleted.
-						files: {
-							create: i.files.map((f, index) => ({
-								assetId: f.assetId,
-								fileName: f.fileName,
-								sortOrder: index,
-							})),
-						},
-					})),
-				},
 			},
 		})
+
+		/*
+		 * The lines, one at a time and parents first.
+		 *
+		 * Not a nested create: an option requested with a product is an option of
+		 * that product on the order too, and a nested create cannot point one of
+		 * its rows at a sibling it is creating in the same call.
+		 */
+		const orderLineFor = new Map<string, string>()
+		const parentsFirst = [
+			...priced.filter((i) => !i.parentItemId),
+			...priced.filter((i) => i.parentItemId),
+		]
+
+		for (const i of parentsFirst) {
+			const line = await tx.orderItem.create({
+				data: {
+					orderId: created.id,
+					parentItemId: i.parentItemId ? (orderLineFor.get(i.parentItemId) ?? null) : null,
+					variantId: i.variantId,
+					productId: i.productId,
+					sku: i.sku,
+					name: i.name,
+					attributes: i.attributes,
+					quantity: i.quantity,
+					// The agreed price, not today's catalogue price.
+					unitPrice: i.quotedUnitPrice!.toString(),
+					lineTotal: i.quotedLineTotal!.toString(),
+					// The drawing follows the line onto the order. It was frozen once
+					// at submission; this copies that record rather than re-reading
+					// the upload, which may since have been deleted.
+					files: {
+						create: i.files.map((f, index) => ({
+							assetId: f.assetId,
+							fileName: f.fileName,
+							sortOrder: index,
+						})),
+					},
+				},
+			})
+
+			orderLineFor.set(i.id, line.id)
+		}
 
 		/*
 		 * Reserve stock, exactly as checkout does.

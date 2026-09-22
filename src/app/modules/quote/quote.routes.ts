@@ -21,6 +21,12 @@ QuoteRoutes.use(optionalAuth)
 // ── basket ───────────────────────────────────────────────────────────────────
 QuoteRoutes.get("/basket", QuoteController.getBasket)
 QuoteRoutes.post("/basket/items", validateRequest(QuoteValidation.addItemSchema), QuoteController.addItem)
+// An inquiry product together with the options ticked in the configurator.
+QuoteRoutes.post(
+	"/basket/configuration",
+	validateRequest(QuoteValidation.addConfigurationSchema),
+	QuoteController.addConfiguration
+)
 QuoteRoutes.patch("/basket/items/:id", validateRequest(QuoteValidation.updateItemSchema), QuoteController.updateItem)
 /**
  * Artwork on a basket line.

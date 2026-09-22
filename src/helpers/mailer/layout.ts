@@ -64,15 +64,16 @@ export const renderLayout = ({
 	branding = DEFAULT_BRANDING,
 	additionalContent,
 }: LayoutInput): string => {
-	const { baseColour, backgroundColour, bodyBackgroundColour, textColour } = branding
+	const { baseColour, backgroundColour, bodyBackgroundColour, headerBackgroundColour, textColour } = branding
 	const onBase = readableOn(baseColour)
+	const onHeader = readableOn(headerBackgroundColour)
 
 	// A logo if there is one, the shop's name if not. Height-capped and given
 	// alt text, because a good number of clients block images by default and the
 	// header should still say who the mail is from.
 	const header = branding.headerImage
-		? `<img src="${escapeHtml(branding.headerImage)}" alt="${escapeHtml(company.name || "astano")}" height="40" style="display:block;max-height:40px;width:auto;border:0;">`
-		: `<div style="font-size:20px;font-weight:bold;color:${onBase};">${escapeHtml(company.name || "astano")}</div>`
+		? `<img src="${escapeHtml(branding.headerImage)}" alt="astano" height="56" style="display:block;height:56px;max-height:56px;width:auto;border:0;">`
+		: `<div style="font-size:20px;font-weight:bold;color:${onHeader};">${escapeHtml(company.name || "astano")}</div>`
 
 	const footer = branding.footerText
 		? paragraphs(branding.footerText, "margin:0 0 6px;")
@@ -96,10 +97,10 @@ export const renderLayout = ({
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${backgroundColour};padding:24px 0;">
     <tr><td align="center">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;background:${bodyBackgroundColour};border-radius:6px;overflow:hidden;">
-        <!-- The header band carries the brand colour, as WooCommerce's does.
-             Putting it only on the button would leave the setting invisible on
-             most messages: an order confirmation has no button at all. -->
-        <tr><td style="padding:24px 32px;background:${baseColour};">
+        <!-- The header band has its own colour, white unless changed: the logo
+             is black line-work and vanished on the old dark band. The base
+             colour stays on buttons and links. -->
+        <tr><td style="padding:24px 32px;background:${headerBackgroundColour};border-bottom:1px solid rgba(128,128,128,0.25);">
           ${header}
         </td></tr>
         <tr><td style="padding:32px;color:${textColour};">
