@@ -68,13 +68,17 @@ export const loadBundleDiscounts = async (
 }
 
 /**
- * Option lines whose option is set to follow the main product's quantity.
+ * Option lines whose option is set to follow the main product's quantity,
+ * mapped to how many of the main product one of them covers — 1 for a pack per
+ * cutter, 4 for a box of four.
  *
  * Read from `ProductOption` on every call, like the discount above, so an
  * admin ticking the box changes baskets that already exist. Shared by the cart
- * and the inquiry basket: both keep such a line at its parent's quantity.
+ * and the inquiry basket: both keep such a line in step with its parent.
  */
-export const loadFollowingLines = async (items: DiscountableLine[]): Promise<Set<string>> => {
+export const loadFollowingLines = async (
+	items: DiscountableLine[]
+): Promise<Map<string, number>> => {
 	const pairs = items
 		.filter((i) => i.parentItemId)
 		.map((line) => {
@@ -88,21 +92,27 @@ export const loadFollowingLines = async (items: DiscountableLine[]): Promise<Set
 		})
 		.filter((p): p is NonNullable<typeof p> => p !== null)
 
-	if (!pairs.length) return new Set()
+	if (!pairs.length) return new Map()
 
 	const rows = await prisma.productOption.findMany({
 		where: {
 			followsMainQuantity: true,
 			OR: pairs.map((p) => ({ productId: p.ownerProductId, optionProductId: p.optionProductId })),
 		},
-		select: { productId: true, optionProductId: true },
+		select: { productId: true, optionProductId: true, unitsPerOption: true },
 	})
 
-	const following = new Set(rows.map((r) => `${r.productId}:${r.optionProductId}`))
-
-	return new Set(
-		pairs.filter((p) => following.has(`${p.ownerProductId}:${p.optionProductId}`)).map((p) => p.lineId)
+	const following = new Map(
+		rows.map((r) => [`${r.productId}:${r.optionProductId}`, r.unitsPerOption])
 	)
+
+	const result = new Map<string, number>()
+	for (const p of pairs) {
+		const per = following.get(`${p.ownerProductId}:${p.optionProductId}`)
+		if (per !== undefined) result.set(p.lineId, per)
+	}
+
+	return result
 }
 
 /** Applies a bundle discount to an already-tiered unit price. */

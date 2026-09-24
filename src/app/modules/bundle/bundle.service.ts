@@ -5,6 +5,7 @@ import {
 	startingQuantityFor,
 	type ConfigurableLine,
 } from "../../../domain/bundle/priceBundle"
+import { followingQuantity } from "../../../domain/bundle/followQuantity"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import type { RolePriceInput } from "../../../domain/pricing/resolvePrice"
 import { availableOf, canTake, readStockRules } from "../../../domain/stock/availability"
@@ -124,7 +125,12 @@ const loadConfiguration = async (
 
 	const offeredVariants = new Map<
 		string,
-		{ variant: VariantRow; discountPercent: string | null; followsMainQuantity: boolean }
+		{
+			variant: VariantRow
+			discountPercent: string | null
+			followsMainQuantity: boolean
+			unitsPerOption: number
+		}
 	>()
 	for (const o of offered) {
 		for (const v of o.optionProduct.variants) {
@@ -132,6 +138,7 @@ const loadConfiguration = async (
 				variant: v as VariantRow,
 				discountPercent: o.discountPercent?.toString() ?? null,
 				followsMainQuantity: o.followsMainQuantity,
+				unitsPerOption: o.unitsPerOption,
 			})
 		}
 	}
@@ -170,7 +177,9 @@ const loadConfiguration = async (
 			 * switch exists is quotes that could not be made from the quantities
 			 * customers typed.
 			 */
-			quantity: entry.followsMainQuantity ? mainQuantity : sel.quantity,
+			quantity: entry.followsMainQuantity
+				? followingQuantity(mainQuantity, entry.unitsPerOption)
+				: sel.quantity,
 			discountPercent: entry.discountPercent,
 		})
 	}
@@ -250,6 +259,7 @@ const price = async (
 					moq: o.optionProduct.moq,
 					discountPercent: o.discountPercent?.toString() ?? null,
 					followsMainQuantity: o.followsMainQuantity,
+					unitsPerOption: o.unitsPerOption,
 				}))
 		),
 	}

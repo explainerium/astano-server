@@ -183,6 +183,9 @@ const option = z.object({
 	discountPercent: money.nullable().optional(),
 	/// Ordered in the main product's quantity; the customer types none for it.
 	followsMainQuantity: z.boolean().default(false),
+	/// How many of the main product one of this option covers — 4 for a box of
+	/// four. Only read when the option follows the main quantity.
+	unitsPerOption: z.number().int().min(1).max(100000).default(1),
 })
 
 const productBody = z.object({

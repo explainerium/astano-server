@@ -5,6 +5,7 @@ import {
 	type LadderPlan,
 	type ParsedPriceList,
 } from "../../../domain/pricing/priceList"
+import { getEffectiveMoq } from "../../../domain/moq/getEffectiveMoq"
 import { prisma } from "../../../shared/prisma"
 
 /**
@@ -70,18 +71,34 @@ export interface PriceListReport {
 	ladders: LadderReport[]
 }
 
-const skuIndex = async (skus: string[]): Promise<Map<string, { productId: string; quoteEnabled: boolean }>> => {
+const skuIndex = async (
+	skus: string[]
+): Promise<Map<string, { productId: string; quoteEnabled: boolean; moq: number }>> => {
 	if (!skus.length) return new Map()
 
 	const variants = await prisma.productVariant.findMany({
 		where: { sku: { in: skus } },
-		select: { sku: true, productId: true, product: { select: { quoteEnabled: true } } },
+		// `moq` because a list that starts above one is read against it — see
+		// `planLadders`. The variant's own minimum wins, as everywhere else.
+		select: {
+			sku: true,
+			productId: true,
+			moq: true,
+			product: { select: { quoteEnabled: true, moq: true } },
+		},
 	})
 
 	return new Map(
 		variants
 			.filter((variant) => variant.sku)
-			.map((variant) => [variant.sku!, { productId: variant.productId, quoteEnabled: variant.product.quoteEnabled }])
+			.map((variant) => [
+				variant.sku!,
+				{
+					productId: variant.productId,
+					quoteEnabled: variant.product.quoteEnabled,
+					moq: getEffectiveMoq({ productMoq: variant.product.moq, variantMoq: variant.moq }),
+				},
+			])
 	)
 }
 
@@ -133,10 +150,16 @@ const runImport = async (
 ): Promise<PriceListReport> => {
 	const whole = parsePriceList(csv, params.delimiter)
 	const parsed = { ...whole, rows: onlyThese(whole.rows, params.onlySkus) }
-	const plans = planLadders(parsed.rows)
 
 	const articles = [...new Set(parsed.rows.map((row) => row.sku).filter(Boolean))]
 	const known = await skuIndex(articles)
+
+	// Planned after the lookup, not before: a dealer list that starts above one
+	// is read against the article's own minimum order quantity.
+	const plans = planLadders(
+		parsed.rows,
+		new Map([...known].map(([sku, product]) => [sku, product.moq]))
+	)
 
 	const report: PriceListReport = {
 		dryRun: params.dryRun,

@@ -534,6 +534,12 @@ model ProductOption {
   /// main line changes. Off: the customer chooses the option's own quantity.
   followsMainQuantity Boolean @default(false)
 
+  /// How many of the main product one of this option covers, when it follows
+  /// the main quantity. 1 is one for one — a single pack per ice cube. 4 is a
+  /// box of four: 400 cubes need 100 boxes. Never 0, and ignored entirely
+  /// unless `followsMainQuantity` is set.
+  unitsPerOption Int @default(1)
+
   createdAt DateTime @default(now())
 
   @@unique([productId, optionProductId])

@@ -83,7 +83,8 @@ describe("parsePriceList", () => {
 })
 
 describe("planLadders", () => {
-	const plan = (body: string) => planLadders(parsePriceList(csv(body)).rows)
+	const plan = (body: string, minimums?: Map<string, number>) =>
+		planLadders(parsePriceList(csv(body)).rows, minimums)
 
 	it("makes the quantity-one price the base and the rest rungs", () => {
 		const [guest] = plan("1-ESH-1;Standard;1,00;0,44\n1-ESH-1;Standard;50,00;0,40\n1-ESH-1;Standard;250,00;0,36")
@@ -107,6 +108,38 @@ describe("planLadders", () => {
 		expect(dealer?.baseSource).toBe("standard-below-minimum")
 		expect(dealer?.rungs.map((r) => r.minQuantity)).toEqual([50, 500])
 		expect(dealer?.issues).toEqual(["This list starts at 50, so below that the Standard price applies"])
+	})
+
+	/*
+	 * The client, 23 September, after importing 1-FSI1-L for real: the shop
+	 * showed 1.69 as the Händlerpreis with 1.18 sitting under it as a step — on
+	 * an article nobody may order fewer than fifty of. Where the minimum makes
+	 * everything below the first step unreachable, that step is the price.
+	 */
+	it("makes the first step the base when the article cannot be ordered in fewer", () => {
+		const plans = plan(
+			"1-FSI1-L;Standard;1,00;1,69\n1-FSI1-L;Händler;50,00;1,18\n1-FSI1-L;Händler;100,00;1,04",
+			new Map([["1-FSI1-L", 50]])
+		)
+		const dealer = plans.find((p) => p.role === "RESELLER")
+
+		expect(dealer?.basePrice.toString()).toBe("1.18")
+		expect(dealer?.baseSource).toBe("lowest-rung-at-moq")
+		expect(dealer?.rungs.map((r) => [r.minQuantity, r.value.toString()])).toEqual([[100, "1.04"]])
+
+		// The guest ladder is untouched by any of this.
+		expect(plans.find((p) => p.role === "GUEST")?.basePrice.toString()).toBe("1.69")
+	})
+
+	it("keeps the standard price below the first step when fewer really can be ordered", () => {
+		const dealer = plan(
+			"1-FSI1-L;Standard;1,00;1,69\n1-FSI1-L;Händler;50,00;1,18",
+			new Map([["1-FSI1-L", 10]])
+		).find((p) => p.role === "RESELLER")
+
+		expect(dealer?.basePrice.toString()).toBe("1.69")
+		expect(dealer?.baseSource).toBe("standard-below-minimum")
+		expect(dealer?.rungs.map((r) => r.minQuantity)).toEqual([50])
 	})
 
 	it("says so when a ladder starts above one and there is no standard price to fall back on", () => {

@@ -24,6 +24,7 @@ import {
 import { ArtworkService } from "../media/artwork.service"
 import { BundleService } from "../bundle/bundle.service"
 import { loadFollowingLines } from "../cart/bundleDiscount"
+import { followingQuantity } from "../../../domain/bundle/followQuantity"
 import ApiError from "../../errors/ApiError"
 import { GUEST_BASKET_TTL_DAYS } from "./quote.constant"
 
@@ -81,7 +82,12 @@ const formatNumber = (n: number): string => `RFQ-${String(n).padStart(6, "0")}`
 
 // ── basket ───────────────────────────────────────────────────────────────────
 
-const basketView = (basket: BasketRow, locale: LocaleCode, following: Set<string> = new Set()) => {
+const basketView = (
+	basket: BasketRow,
+	locale: LocaleCode,
+	/** Option lines that follow their product, and how many units each covers. */
+	following: Map<string, number> = new Map()
+) => {
 	const build = (i: BasketRow["items"][number]) => {
 		const product = i.variant.product
 		const t = pick(product.translations, locale)
@@ -101,6 +107,8 @@ const basketView = (basket: BasketRow, locale: LocaleCode, following: Set<string
 			quantity: i.quantity,
 			/// An option ordered in its parent's quantity; no stepper of its own.
 			followsMain: following.has(i.id),
+			/// How many of the product one of these covers — 4 for a box of four.
+			followsPerUnits: following.get(i.id) ?? 1,
 			note: i.note,
 			files: i.files.map((f) => ArtworkService.toFile(f.asset)),
 			moq,
@@ -470,7 +478,9 @@ const updateItem = async (
 		await prisma.quoteBasketItem.update({
 			where: { id: itemId },
 			data: {
-				quantity: parent?.quantity ?? item.quantity,
+				quantity: parent
+					? followingQuantity(parent.quantity, following.get(item.id) ?? 1)
+					: item.quantity,
 				...(payload.note !== undefined ? { note: payload.note } : {}),
 			},
 		})
@@ -493,15 +503,14 @@ const updateItem = async (
 			where: { id: itemId },
 			data: { quantity, ...(payload.note !== undefined ? { note: payload.note } : {}) },
 		}),
-		// Options that follow this product move with it.
-		...(followers.length
-			? [
-					prisma.quoteBasketItem.updateMany({
-						where: { id: { in: followers.map((f) => f.id) } },
-						data: { quantity },
-					}),
-				]
-			: []),
+		// Options that follow this product move with it — one for one, or one per
+		// box of four.
+		...followers.map((follower) =>
+			prisma.quoteBasketItem.update({
+				where: { id: follower.id },
+				data: { quantity: followingQuantity(quantity, following.get(follower.id) ?? 1) },
+			})
+		),
 	])
 
 	return { basket: await reload(basket.id, locale), token, adjusted }

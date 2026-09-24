@@ -22,6 +22,7 @@ import { generateToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
 import { GUEST_CART_TTL_DAYS } from "./cart.constant"
 import { applyBundleDiscount, loadBundleDiscounts, loadFollowingLines } from "./bundleDiscount"
+import { followingQuantity } from "../../../domain/bundle/followQuantity"
 import { loadExternalTiers, type ExternalTiers } from "../product/tierSources"
 
 const cartInclude = {
@@ -130,7 +131,8 @@ const view = (
 	bundleDiscounts?: Map<string, Decimal>,
 	externalTiers?: (productId: string) => ExternalTiers,
 	stockRules: StockRules = DEFAULT_STOCK_RULES,
-	following: Set<string> = new Set()
+	/** Option lines that follow their parent, and how many units each covers. */
+	following: Map<string, number> = new Map()
 ) => {
 	const lines = cart.items
 		// Option lines are nested under their parent rather than listed flat.
@@ -158,6 +160,9 @@ const view = (
 					/// An option ordered in its parent's quantity. The cart shows no
 					/// stepper for it; changing the parent changes it.
 					followsMain: following.has(i.id),
+					/// How many of the parent one of these covers — 4 for a box of
+					/// four. Only meaningful with `followsMain`.
+					followsPerUnits: following.get(i.id) ?? 1,
 					moq,
 					belowMoq: isBelowMoq(i.quantity, moq),
 					// The drawing this line is to be made from. Ordered as the customer
@@ -490,21 +495,23 @@ const addItem = async (
 	 * An option set to follow its product is added in the product's quantity,
 	 * whatever was posted — the configurator is not the only way to reach this.
 	 */
-	const follows = parent
-		? ((
-				await prisma.productOption.findUnique({
-					where: {
-						productId_optionProductId: {
-							productId: parent.variant.productId,
-							optionProductId: variant.productId,
-						},
+	const link = parent
+		? await prisma.productOption.findUnique({
+				where: {
+					productId_optionProductId: {
+						productId: parent.variant.productId,
+						optionProductId: variant.productId,
 					},
-					select: { followsMainQuantity: true },
-				})
-			)?.followsMainQuantity ?? false)
-		: false
+				},
+				select: { followsMainQuantity: true, unitsPerOption: true },
+			})
+		: null
 
-	if (follows && parent) payload = { ...payload, quantity: parent.quantity }
+	const follows = link?.followsMainQuantity ?? false
+
+	if (follows && parent) {
+		payload = { ...payload, quantity: followingQuantity(parent.quantity, link!.unitsPerOption) }
+	}
 
 	const moq = getEffectiveMoq({ productMoq: variant.product.moq, variantMoq: variant.moq })
 
@@ -607,8 +614,12 @@ const updateItem = async (
 	 */
 	if (following.has(item.id)) {
 		const parent = cart.items.find((i) => i.id === item.parentItemId)
-		if (parent && parent.quantity !== item.quantity) {
-			await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: parent.quantity } })
+		const wanted = parent
+			? followingQuantity(parent.quantity, following.get(item.id) ?? 1)
+			: item.quantity
+
+		if (wanted !== item.quantity) {
+			await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: wanted } })
 		}
 		return { cart: await readAndPrice(cart.id, owner, locale), token, adjusted: false }
 	}
@@ -636,17 +647,16 @@ const updateItem = async (
 
 	await prisma.$transaction([
 		prisma.cartItem.update({ where: { id: itemId }, data: { quantity: finalQuantity } }),
-		// Options that follow this line move with it. Their stock and minimum are
-		// reported on the cart rather than refused here — the main line is what
-		// the customer changed, and refusing it for an option would read wrong.
-		...(followers.length
-			? [
-					prisma.cartItem.updateMany({
-						where: { id: { in: followers.map((f) => f.id) } },
-						data: { quantity: finalQuantity },
-					}),
-				]
-			: []),
+		// Options that follow this line move with it — one for one, or one per
+		// box of four. Their stock and minimum are reported on the cart rather
+		// than refused here: the main line is what the customer changed, and
+		// refusing it for an option would read wrong.
+		...followers.map((follower) =>
+			prisma.cartItem.update({
+				where: { id: follower.id },
+				data: { quantity: followingQuantity(finalQuantity, following.get(follower.id) ?? 1) },
+			})
+		),
 	])
 
 	return { cart: await readAndPrice(cart.id, owner, locale, stockRules), token, adjusted }
