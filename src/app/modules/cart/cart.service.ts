@@ -22,7 +22,7 @@ import { generateToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
 import { GUEST_CART_TTL_DAYS } from "./cart.constant"
 import { applyBundleDiscount, loadBundleDiscounts, loadFollowingLines } from "./bundleDiscount"
-import { followingQuantity } from "../../../domain/bundle/followQuantity"
+import { followingQuantity, packedMainQuantity } from "../../../domain/bundle/followQuantity"
 import { loadExternalTiers, type ExternalTiers } from "../product/tierSources"
 
 const cartInclude = {
@@ -645,8 +645,21 @@ const updateItem = async (
 
 	const followers = cart.items.filter((i) => i.parentItemId === item.id && following.has(i.id))
 
+	/*
+	 * Raised again, to fill whole packs.
+	 *
+	 * A hundred cutters with a box of six is seventeen boxes holding a hundred
+	 * and two, so the line goes to a hundred and two — the same rule the
+	 * configurator applies, applied again here because the cart is the other
+	 * place the quantity can be changed.
+	 */
+	const packed = packedMainQuantity(
+		finalQuantity,
+		followers.map((follower) => following.get(follower.id) ?? 1)
+	)
+
 	await prisma.$transaction([
-		prisma.cartItem.update({ where: { id: itemId }, data: { quantity: finalQuantity } }),
+		prisma.cartItem.update({ where: { id: itemId }, data: { quantity: packed } }),
 		// Options that follow this line move with it — one for one, or one per
 		// box of four. Their stock and minimum are reported on the cart rather
 		// than refused here: the main line is what the customer changed, and
@@ -654,12 +667,17 @@ const updateItem = async (
 		...followers.map((follower) =>
 			prisma.cartItem.update({
 				where: { id: follower.id },
-				data: { quantity: followingQuantity(finalQuantity, following.get(follower.id) ?? 1) },
+				data: { quantity: followingQuantity(packed, following.get(follower.id) ?? 1) },
 			})
 		),
 	])
 
-	return { cart: await readAndPrice(cart.id, owner, locale, stockRules), token, adjusted }
+	// "Raised" covers both reasons: the minimum, and filling whole packs.
+	return {
+		cart: await readAndPrice(cart.id, owner, locale, stockRules),
+		token,
+		adjusted: adjusted || packed !== quantity,
+	}
 }
 
 const removeItem = async (owner: CartOwner, itemId: string, locale: LocaleCode) => {

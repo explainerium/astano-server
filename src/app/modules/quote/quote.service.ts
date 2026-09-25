@@ -24,7 +24,7 @@ import {
 import { ArtworkService } from "../media/artwork.service"
 import { BundleService } from "../bundle/bundle.service"
 import { loadFollowingLines } from "../cart/bundleDiscount"
-import { followingQuantity } from "../../../domain/bundle/followQuantity"
+import { followingQuantity, packedMainQuantity } from "../../../domain/bundle/followQuantity"
 import ApiError from "../../errors/ApiError"
 import { GUEST_BASKET_TTL_DAYS } from "./quote.constant"
 
@@ -402,7 +402,7 @@ const addConfiguration = async (
 ) => {
 	const { basket, token } = await resolveBasket(owner)
 
-	const { main, chosen } = await BundleService.loadConfiguration(
+	const { main, chosen, quantity } = await BundleService.loadConfiguration(
 		payload.variantId,
 		payload.options,
 		locale,
@@ -410,7 +410,7 @@ const addConfiguration = async (
 	)
 
 	for (const line of [
-		{ variant: main, quantity: payload.quantity },
+		{ variant: main, quantity },
 		...chosen.map((option) => ({ variant: option.variant, quantity: option.quantity })),
 	]) {
 		const moq = getEffectiveMoq({ productMoq: line.variant.product.moq, variantMoq: line.variant.moq })
@@ -424,7 +424,8 @@ const addConfiguration = async (
 
 	await prisma.$transaction(async (tx) => {
 		const parent = await tx.quoteBasketItem.create({
-			data: { basketId: basket.id, variantId: main.id, quantity: payload.quantity },
+			// The posted quantity, raised to fill whole packs — see loadConfiguration.
+			data: { basketId: basket.id, variantId: main.id, quantity },
 		})
 
 		for (const option of chosen) {
@@ -498,22 +499,28 @@ const updateItem = async (
 
 	const followers = basket.items.filter((i) => i.parentItemId === item.id && following.has(i.id))
 
+	// Raised again to fill whole packs, as the configurator and the cart do.
+	const packed = packedMainQuantity(
+		quantity,
+		followers.map((follower) => following.get(follower.id) ?? 1)
+	)
+
 	await prisma.$transaction([
 		prisma.quoteBasketItem.update({
 			where: { id: itemId },
-			data: { quantity, ...(payload.note !== undefined ? { note: payload.note } : {}) },
+			data: { quantity: packed, ...(payload.note !== undefined ? { note: payload.note } : {}) },
 		}),
 		// Options that follow this product move with it — one for one, or one per
 		// box of four.
 		...followers.map((follower) =>
 			prisma.quoteBasketItem.update({
 				where: { id: follower.id },
-				data: { quantity: followingQuantity(quantity, following.get(follower.id) ?? 1) },
+				data: { quantity: followingQuantity(packed, following.get(follower.id) ?? 1) },
 			})
 		),
 	])
 
-	return { basket: await reload(basket.id, locale), token, adjusted }
+	return { basket: await reload(basket.id, locale), token, adjusted: adjusted || packed !== quantity }
 }
 
 const removeItem = async (owner: BasketOwner, itemId: string, locale: LocaleCode) => {

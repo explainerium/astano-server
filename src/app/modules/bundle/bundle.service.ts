@@ -5,7 +5,7 @@ import {
 	startingQuantityFor,
 	type ConfigurableLine,
 } from "../../../domain/bundle/priceBundle"
-import { followingQuantity } from "../../../domain/bundle/followQuantity"
+import { followingQuantity, packedMainQuantity } from "../../../domain/bundle/followQuantity"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import type { RolePriceInput } from "../../../domain/pricing/resolvePrice"
 import { availableOf, canTake, readStockRules } from "../../../domain/stock/availability"
@@ -154,6 +154,21 @@ const loadConfiguration = async (
 	 */
 	const chosen: { variant: VariantRow; quantity: number; discountPercent: string | null }[] = []
 
+	/*
+	 * The main quantity, raised to fill whole packs.
+	 *
+	 * The client, 25 September: a hundred ice cubes with a box of six is
+	 * seventeen boxes, which hold a hundred and two. So the cubes go up to a
+	 * hundred and two and every box travels full. Worked out before the options
+	 * are priced, because each following option is counted from this number.
+	 */
+	const packSizes = options.flatMap((sel) => {
+		const entry = offeredVariants.get(sel.variantId)
+		return entry?.followsMainQuantity ? [entry.unitsPerOption] : []
+	})
+
+	const quantity = packedMainQuantity(mainQuantity, packSizes)
+
 	for (const sel of options) {
 		const entry = offeredVariants.get(sel.variantId)
 		if (!entry) {
@@ -178,13 +193,15 @@ const loadConfiguration = async (
 			 * customers typed.
 			 */
 			quantity: entry.followsMainQuantity
-				? followingQuantity(mainQuantity, entry.unitsPerOption)
+				? followingQuantity(quantity, entry.unitsPerOption)
 				: sel.quantity,
 			discountPercent: entry.discountPercent,
 		})
 	}
 
-	return { main, offered, chosen }
+	/// `quantity` is what the main line is actually ordered in — the posted
+	/// number, raised to fill whole packs. Every caller writes and prices that.
+	return { main, offered, chosen, quantity }
 }
 
 interface Viewer {
@@ -217,7 +234,7 @@ const price = async (
 	payload: { variantId: string; quantity: number; options: Selection[] },
 	locale: LocaleCode
 ) => {
-	const { main, offered, chosen } = await loadConfiguration(
+	const { main, offered, chosen, quantity } = await loadConfiguration(
 		payload.variantId,
 		payload.options,
 		locale,
@@ -231,7 +248,7 @@ const price = async (
 
 	const priced = priceBundle({
 		role: roleOf(ctx),
-		main: toLine(main, payload.quantity, locale, null, external(main.productId)),
+		main: toLine(main, quantity, locale, null, external(main.productId)),
 		options: chosen.map((option) =>
 			toLine(
 				option.variant,
@@ -245,6 +262,9 @@ const price = async (
 
 	return {
 		...priced,
+		/// What the main line comes to once whole packs are filled. The page
+		/// shows it, and says so when it is more than was typed.
+		quantity,
 		/// Everything on offer, with the quantity each would start at if ticked.
 		available: offered.flatMap((o) =>
 			o.optionProduct.variants
@@ -278,7 +298,7 @@ const addToCart = async (
 	payload: { variantId: string; quantity: number; options: Selection[] },
 	locale: LocaleCode
 ) => {
-	const { main, chosen } = await loadConfiguration(
+	const { main, chosen, quantity } = await loadConfiguration(
 		payload.variantId,
 		payload.options,
 		locale,
@@ -292,7 +312,7 @@ const addToCart = async (
 
 	const priced = priceBundle({
 		role: roleOf(ctx),
-		main: toLine(main, payload.quantity, locale, null, external(main.productId)),
+		main: toLine(main, quantity, locale, null, external(main.productId)),
 		options: chosen.map((option) =>
 			toLine(
 				option.variant,
@@ -329,7 +349,7 @@ const addToCart = async (
 	// `chosen` already carries the whole variant row, so this no longer fetches
 	// each option again one at a time.
 	for (const line of [
-		{ variant: main, quantity: payload.quantity },
+		{ variant: main, quantity },
 		...chosen.map((option) => ({ variant: option.variant, quantity: option.quantity })),
 	]) {
 		if (!canTake(line.variant, line.quantity, stockRules)) {
@@ -342,7 +362,7 @@ const addToCart = async (
 
 	await prisma.$transaction(async (tx) => {
 		const parent = await tx.cartItem.create({
-			data: { cartId: owner.cartId, variantId: main.id, quantity: payload.quantity },
+			data: { cartId: owner.cartId, variantId: main.id, quantity },
 		})
 
 		for (const option of chosen) {
