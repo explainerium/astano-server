@@ -5,7 +5,12 @@ import {
 	startingQuantityFor,
 	type ConfigurableLine,
 } from "../../../domain/bundle/priceBundle"
-import { followingQuantity, packedMainQuantity } from "../../../domain/bundle/followQuantity"
+import {
+	followerQuantities,
+	packedMainQuantity,
+	packSizesOf,
+	type FollowRule,
+} from "../../../domain/bundle/followQuantity"
 import { effectiveRole, type PricingRole } from "../../../domain/pricing/effectiveRole"
 import type { RolePriceInput } from "../../../domain/pricing/resolvePrice"
 import { availableOf, canTake, readStockRules } from "../../../domain/stock/availability"
@@ -128,8 +133,9 @@ const loadConfiguration = async (
 		{
 			variant: VariantRow
 			discountPercent: string | null
-			followsMainQuantity: boolean
-			unitsPerOption: number
+			/// Set when the option follows: counted from the main quantity, or
+			/// from the boxes chosen beside it.
+			rule: FollowRule | null
 		}
 	>()
 	for (const o of offered) {
@@ -137,8 +143,9 @@ const loadConfiguration = async (
 			offeredVariants.set(v.id, {
 				variant: v as VariantRow,
 				discountPercent: o.discountPercent?.toString() ?? null,
-				followsMainQuantity: o.followsMainQuantity,
-				unitsPerOption: o.unitsPerOption,
+				rule: o.followsMainQuantity
+					? { unitsPerOption: o.unitsPerOption, countsOptions: o.countsOptionProductIds }
+					: null,
 			})
 		}
 	}
@@ -162,12 +169,29 @@ const loadConfiguration = async (
 	 * hundred and two and every box travels full. Worked out before the options
 	 * are priced, because each following option is counted from this number.
 	 */
-	const packSizes = options.flatMap((sel) => {
+	const rules = options.flatMap((sel) => {
 		const entry = offeredVariants.get(sel.variantId)
-		return entry?.followsMainQuantity ? [entry.unitsPerOption] : []
+		return entry?.rule ? [entry.rule] : []
 	})
 
-	const quantity = packedMainQuantity(mainQuantity, packSizes)
+	const quantity = packedMainQuantity(mainQuantity, packSizesOf(rules))
+
+	/*
+	 * Every following option's quantity, boxes first and then what counts them.
+	 *
+	 * The client, 28 September: a hundred cubes in boxes of two is fifty boxes,
+	 * so fifty prints; in boxes of four, twenty-five. Keyed by the posted
+	 * variant, which is unique within one configuration.
+	 */
+	const followed = followerQuantities(
+		quantity,
+		options.flatMap((sel) => {
+			const entry = offeredVariants.get(sel.variantId)
+			return entry?.rule
+				? [{ id: sel.variantId, productId: entry.variant.productId, rule: entry.rule }]
+				: []
+		})
+	)
 
 	for (const sel of options) {
 		const entry = offeredVariants.get(sel.variantId)
@@ -183,6 +207,14 @@ const loadConfiguration = async (
 			})
 		}
 
+		// A print chosen without a box to print on.
+		if (followed.get(sel.variantId) === 0) {
+			throw new ApiError(httpStatus.CONFLICT, "This option needs a box to go on", {
+				messageKey: "bundle.optionNeedsBox",
+				messageVars: { sku: labelFor(entry.variant, locale) },
+			})
+		}
+
 		chosen.push({
 			variant: entry.variant,
 			/*
@@ -192,9 +224,7 @@ const loadConfiguration = async (
 			 * switch exists is quotes that could not be made from the quantities
 			 * customers typed.
 			 */
-			quantity: entry.followsMainQuantity
-				? followingQuantity(quantity, entry.unitsPerOption)
-				: sel.quantity,
+			quantity: entry.rule ? followed.get(sel.variantId)! : sel.quantity,
 			discountPercent: entry.discountPercent,
 		})
 	}
@@ -280,6 +310,11 @@ const price = async (
 					discountPercent: o.discountPercent?.toString() ?? null,
 					followsMainQuantity: o.followsMainQuantity,
 					unitsPerOption: o.unitsPerOption,
+					/// Which product this option is, and — for a print on the box —
+					/// which of the other options it counts. The page adds the
+					/// chosen ones up to show the print's quantity.
+					optionProductId: o.optionProductId,
+					countsOptionProductIds: o.countsOptionProductIds,
 				}))
 		),
 	}

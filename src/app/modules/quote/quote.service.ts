@@ -23,8 +23,8 @@ import {
 } from "../../../domain/product/artwork"
 import { ArtworkService } from "../media/artwork.service"
 import { BundleService } from "../bundle/bundle.service"
-import { loadFollowingLines } from "../cart/bundleDiscount"
-import { followingQuantity, packedMainQuantity } from "../../../domain/bundle/followQuantity"
+import { followerPackSizes, followerPlan, loadFollowingLines } from "../cart/bundleDiscount"
+import { packedMainQuantity, type FollowRule } from "../../../domain/bundle/followQuantity"
 import ApiError from "../../errors/ApiError"
 import { GUEST_BASKET_TTL_DAYS } from "./quote.constant"
 
@@ -86,7 +86,7 @@ const basketView = (
 	basket: BasketRow,
 	locale: LocaleCode,
 	/** Option lines that follow their product, and how many units each covers. */
-	following: Map<string, number> = new Map()
+	following: Map<string, FollowRule> = new Map()
 ) => {
 	const build = (i: BasketRow["items"][number]) => {
 		const product = i.variant.product
@@ -108,7 +108,9 @@ const basketView = (
 			/// An option ordered in its parent's quantity; no stepper of its own.
 			followsMain: following.has(i.id),
 			/// How many of the product one of these covers — 4 for a box of four.
-			followsPerUnits: following.get(i.id) ?? 1,
+			followsPerUnits: following.get(i.id)?.unitsPerOption ?? 1,
+			/// Counted from the boxes: a print on the box, one per box.
+			followsBoxes: !!following.get(i.id)?.countsOptions.length,
 			note: i.note,
 			files: i.files.map((f) => ArtworkService.toFile(f.asset)),
 			moq,
@@ -449,6 +451,33 @@ const addConfiguration = async (
 	return { basket: await reload(basket.id, locale), token }
 }
 
+/**
+ * Brings every following option of one line back in step with it — the
+ * basket's twin of the cart's. Boxes from the product, prints from the boxes;
+ * a print left with no box under it is removed.
+ */
+const syncFollowers = async (basketId: string, parentId: string) => {
+	const items = await prisma.quoteBasketItem.findMany({
+		where: { basketId },
+		select: { id: true, parentItemId: true, quantity: true, variant: { select: { productId: true } } },
+	})
+	const parent = items.find((i) => i.id === parentId)
+	if (!parent) return
+
+	const changes = followerPlan(parentId, parent.quantity, items, await loadFollowingLines(items)).filter(
+		(line) => line.quantity !== line.current
+	)
+	if (!changes.length) return
+
+	await prisma.$transaction(
+		changes.map((line) =>
+			line.quantity === 0
+				? prisma.quoteBasketItem.delete({ where: { id: line.id } })
+				: prisma.quoteBasketItem.update({ where: { id: line.id }, data: { quantity: line.quantity } })
+		)
+	)
+}
+
 const updateItem = async (
 	owner: BasketOwner,
 	itemId: string,
@@ -466,6 +495,8 @@ const updateItem = async (
 
 	if (payload.quantity === 0) {
 		await prisma.quoteBasketItem.delete({ where: { id: itemId } })
+		// A box gone takes its prints down with it.
+		if (item.parentItemId) await syncFollowers(basket.id, item.parentItemId)
 		return { basket: await reload(basket.id, locale), token, adjusted: false }
 	}
 
@@ -474,17 +505,10 @@ const updateItem = async (
 	// An option that follows its product keeps the product's quantity; its note
 	// is still the customer's to write.
 	if (following.has(item.id)) {
-		const parent = basket.items.find((i) => i.id === item.parentItemId)
-
-		await prisma.quoteBasketItem.update({
-			where: { id: itemId },
-			data: {
-				quantity: parent
-					? followingQuantity(parent.quantity, following.get(item.id) ?? 1)
-					: item.quantity,
-				...(payload.note !== undefined ? { note: payload.note } : {}),
-			},
-		})
+		if (payload.note !== undefined) {
+			await prisma.quoteBasketItem.update({ where: { id: itemId }, data: { note: payload.note } })
+		}
+		if (item.parentItemId) await syncFollowers(basket.id, item.parentItemId)
 
 		return { basket: await reload(basket.id, locale), token, adjusted: false }
 	}
@@ -497,28 +521,17 @@ const updateItem = async (
 	// R4, gate 2 of 3: raise on update, and say so.
 	const { quantity, adjusted } = applyMoqFloor(payload.quantity, moq)
 
-	const followers = basket.items.filter((i) => i.parentItemId === item.id && following.has(i.id))
-
 	// Raised again to fill whole packs, as the configurator and the cart do.
-	const packed = packedMainQuantity(
-		quantity,
-		followers.map((follower) => following.get(follower.id) ?? 1)
-	)
+	const packed = packedMainQuantity(quantity, followerPackSizes(item.id, basket.items, following))
 
-	await prisma.$transaction([
-		prisma.quoteBasketItem.update({
-			where: { id: itemId },
-			data: { quantity: packed, ...(payload.note !== undefined ? { note: payload.note } : {}) },
-		}),
-		// Options that follow this product move with it — one for one, or one per
-		// box of four.
-		...followers.map((follower) =>
-			prisma.quoteBasketItem.update({
-				where: { id: follower.id },
-				data: { quantity: followingQuantity(packed, following.get(follower.id) ?? 1) },
-			})
-		),
-	])
+	await prisma.quoteBasketItem.update({
+		where: { id: itemId },
+		data: { quantity: packed, ...(payload.note !== undefined ? { note: payload.note } : {}) },
+	})
+
+	// Options that follow this product move with it — one for one, one per box
+	// of four, a print per box.
+	await syncFollowers(basket.id, item.id)
 
 	return { basket: await reload(basket.id, locale), token, adjusted: adjusted || packed !== quantity }
 }
@@ -526,7 +539,8 @@ const updateItem = async (
 const removeItem = async (owner: BasketOwner, itemId: string, locale: LocaleCode) => {
 	const { basket, token } = await resolveBasket(owner)
 
-	if (!basket.items.some((i) => i.id === itemId)) {
+	const item = basket.items.find((i) => i.id === itemId)
+	if (!item) {
 		throw new ApiError(httpStatus.NOT_FOUND, "That line is not in your basket", {
 			messageKey: "quote.itemNotFound",
 		})
@@ -534,6 +548,8 @@ const removeItem = async (owner: BasketOwner, itemId: string, locale: LocaleCode
 
 	// Option lines cascade with their product — the database FK handles it.
 	await prisma.quoteBasketItem.delete({ where: { id: itemId } })
+	// A box removed takes its prints down with it.
+	if (item.parentItemId) await syncFollowers(basket.id, item.parentItemId)
 	return { basket: await reload(basket.id, locale), token }
 }
 

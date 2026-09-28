@@ -51,3 +51,56 @@ export const packedMainQuantity = (mainQuantity: number, packSizes: number[]): n
 
 	return Math.ceil(mainQuantity / step) * step
 }
+
+/**
+ * How one following option is counted.
+ *
+ * `countsOptions` empty: from the main quantity, one per `unitsPerOption` — a
+ * box of four. Not empty: from the boxes — the option is ordered once per box
+ * chosen among those option products, whatever size each box is.
+ */
+export interface FollowRule {
+	unitsPerOption: number
+	/** Option product ids whose ordered quantities this option adds up. */
+	countsOptions: string[]
+}
+
+/**
+ * Every following option's quantity, for one main line.
+ *
+ * The client, 28 September: *"If somebody buys 100 ice cubes, he selects the
+ * 2pcs box, which is 50 boxes. If he selects the printing is also has to be
+ * 50. But if he selects the 4pcs box it is only 25 boxes and the printing also
+ * should be 25."* So the printing is not counted from the cubes at all, but
+ * from the boxes: the boxes first, then whatever counts them.
+ *
+ * A counter only adds up boxes that are themselves counted from the main
+ * quantity — a counter of counters would depend on the order the rows were
+ * read in. A counter with no box chosen comes to **0**: printing on no box is
+ * not an order, and every caller treats 0 as "cannot be ordered" rather than
+ * rounding it up to one print.
+ */
+export const followerQuantities = (
+	mainQuantity: number,
+	followers: { id: string; productId: string; rule: FollowRule }[]
+): Map<string, number> => {
+	const result = new Map<string, number>()
+	const boxes = followers.filter((f) => !f.rule.countsOptions.length)
+
+	for (const box of boxes) {
+		result.set(box.id, followingQuantity(mainQuantity, box.rule.unitsPerOption))
+	}
+
+	for (const counter of followers.filter((f) => f.rule.countsOptions.length)) {
+		const counted = boxes
+			.filter((box) => counter.rule.countsOptions.includes(box.productId))
+			.reduce((sum, box) => sum + (result.get(box.id) ?? 0), 0)
+		result.set(counter.id, counted)
+	}
+
+	return result
+}
+
+/** The pack sizes that constrain the main quantity: boxes only, not counters. */
+export const packSizesOf = (rules: FollowRule[]): number[] =>
+	rules.filter((rule) => !rule.countsOptions.length).map((rule) => rule.unitsPerOption)

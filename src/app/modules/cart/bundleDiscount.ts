@@ -1,5 +1,6 @@
 import Decimal from "decimal.js"
 import { prisma } from "../../../shared/prisma"
+import { followerQuantities, packSizesOf, type FollowRule } from "../../../domain/bundle/followQuantity"
 
 /**
  * Bundle discounts for option lines, keyed by cart-item id.
@@ -69,8 +70,8 @@ export const loadBundleDiscounts = async (
 
 /**
  * Option lines whose option is set to follow the main product's quantity,
- * mapped to how many of the main product one of them covers — 1 for a pack per
- * cutter, 4 for a box of four.
+ * mapped to how each is counted — 1 for a pack per cutter, 4 for a box of
+ * four, or once per chosen box for a print on the box.
  *
  * Read from `ProductOption` on every call, like the discount above, so an
  * admin ticking the box changes baskets that already exist. Shared by the cart
@@ -78,7 +79,7 @@ export const loadBundleDiscounts = async (
  */
 export const loadFollowingLines = async (
 	items: DiscountableLine[]
-): Promise<Map<string, number>> => {
+): Promise<Map<string, FollowRule>> => {
 	const pairs = items
 		.filter((i) => i.parentItemId)
 		.map((line) => {
@@ -99,21 +100,64 @@ export const loadFollowingLines = async (
 			followsMainQuantity: true,
 			OR: pairs.map((p) => ({ productId: p.ownerProductId, optionProductId: p.optionProductId })),
 		},
-		select: { productId: true, optionProductId: true, unitsPerOption: true },
+		select: {
+			productId: true,
+			optionProductId: true,
+			unitsPerOption: true,
+			countsOptionProductIds: true,
+		},
 	})
 
-	const following = new Map(
-		rows.map((r) => [`${r.productId}:${r.optionProductId}`, r.unitsPerOption])
+	const following = new Map<string, FollowRule>(
+		rows.map((r) => [
+			`${r.productId}:${r.optionProductId}`,
+			{ unitsPerOption: r.unitsPerOption, countsOptions: r.countsOptionProductIds },
+		])
 	)
 
-	const result = new Map<string, number>()
+	const result = new Map<string, FollowRule>()
 	for (const p of pairs) {
-		const per = following.get(`${p.ownerProductId}:${p.optionProductId}`)
-		if (per !== undefined) result.set(p.lineId, per)
+		const rule = following.get(`${p.ownerProductId}:${p.optionProductId}`)
+		if (rule) result.set(p.lineId, rule)
 	}
 
 	return result
 }
+
+/**
+ * What every following option of one line should now be ordered in.
+ *
+ * Boxes from the parent's quantity, prints from the boxes. A print whose boxes
+ * have all gone comes to 0, and the caller removes it: a print on no box is not
+ * something that can be made. Shared by the cart and the inquiry basket, which
+ * call it whenever a parent's quantity changes or one of its boxes goes.
+ */
+export const followerPlan = (
+	parentId: string,
+	parentQuantity: number,
+	items: (DiscountableLine & { quantity: number })[],
+	following: Map<string, FollowRule>
+): { id: string; quantity: number; current: number }[] => {
+	const followers = items.filter((i) => i.parentItemId === parentId && following.has(i.id))
+	const quantities = followerQuantities(
+		parentQuantity,
+		followers.map((f) => ({ id: f.id, productId: f.variant.productId, rule: following.get(f.id)! }))
+	)
+
+	return followers.map((f) => ({ id: f.id, quantity: quantities.get(f.id) ?? 0, current: f.quantity }))
+}
+
+/** The pack sizes among one line's followers — boxes, not prints. */
+export const followerPackSizes = (
+	parentId: string,
+	items: DiscountableLine[],
+	following: Map<string, FollowRule>
+): number[] =>
+	packSizesOf(
+		items
+			.filter((i) => i.parentItemId === parentId && following.has(i.id))
+			.map((i) => following.get(i.id)!)
+	)
 
 /** Applies a bundle discount to an already-tiered unit price. */
 export const applyBundleDiscount = (unitPrice: Decimal, discount: Decimal): Decimal => {

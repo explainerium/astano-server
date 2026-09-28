@@ -186,6 +186,9 @@ const option = z.object({
 	/// How many of the main product one of this option covers — 4 for a box of
 	/// four. Only read when the option follows the main quantity.
 	unitsPerOption: z.number().int().min(1).max(100000).default(1),
+	/// Count the boxes instead: once per box chosen among these option products.
+	/// A print on the box. Only read when the option follows the main quantity.
+	countsOptionProductIds: z.array(z.string().uuid()).max(50).default([]),
 })
 
 const productBody = z.object({

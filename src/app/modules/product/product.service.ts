@@ -454,6 +454,7 @@ const toPublicProduct = (
 				/// One of these covers this many of the main product: 4 for a box of
 				/// four, so 400 cutters order 100 boxes.
 				unitsPerOption: o.unitsPerOption,
+				countsOptionProductIds: o.countsOptionProductIds,
 				image: toImage(o.optionProduct.featuredAsset),
 				unitPrice:
 					resolvePrice({
@@ -620,6 +621,7 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 			discountPercent: o.discountPercent,
 			followsMainQuantity: o.followsMainQuantity,
 			unitsPerOption: o.unitsPerOption,
+			countsOptionProductIds: o.countsOptionProductIds,
 		})),
 		createdAt: row.createdAt,
 		updatedAt: row.updatedAt,
@@ -1388,6 +1390,7 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 					discountPercent: o.discountPercent ?? null,
 					followsMainQuantity: o.followsMainQuantity ?? false,
 					unitsPerOption: o.unitsPerOption ?? 1,
+					countsOptionProductIds: o.countsOptionProductIds ?? [],
 				})),
 			},
 			variants: {
@@ -1517,6 +1520,7 @@ const duplicate = async (id: string, locale: LocaleCode, createdById?: string) =
 				discountPercent: o.discountPercent,
 				followsMainQuantity: o.followsMainQuantity,
 				unitsPerOption: o.unitsPerOption,
+				countsOptionProductIds: o.countsOptionProductIds,
 			})),
 
 			variants: row.variants.map((v) => ({
@@ -1693,6 +1697,7 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 						discountPercent: o.discountPercent ?? null,
 						followsMainQuantity: o.followsMainQuantity ?? false,
 						unitsPerOption: o.unitsPerOption ?? 1,
+						countsOptionProductIds: o.countsOptionProductIds ?? [],
 					},
 				})
 			}

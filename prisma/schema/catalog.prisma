@@ -540,6 +540,13 @@ model ProductOption {
   /// unless `followsMainQuantity` is set.
   unitsPerOption Int @default(1)
 
+  /// When it follows, count the boxes instead of the main product: the option
+  /// is ordered once per box chosen among these option products. A print on the
+  /// box — 100 cubes in boxes of two is 50 boxes and 50 prints; in boxes of four,
+  /// 25 and 25. Product ids, not option row ids, because a product save
+  /// recreates every option row. Empty: counted from the main quantity.
+  countsOptionProductIds String[] @default([])
+
   createdAt DateTime @default(now())
 
   @@unique([productId, optionProductId])

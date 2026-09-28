@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { followingQuantity, packedMainQuantity } from "../../src/domain/bundle/followQuantity"
+import {
+	followerQuantities,
+	followingQuantity,
+	packedMainQuantity,
+	packSizesOf,
+} from "../../src/domain/bundle/followQuantity"
 
 /**
  * The client's own example, 23 September: a set of four, 100 sets wanted.
@@ -54,5 +59,48 @@ describe("packedMainQuantity", () => {
 	it("leaves the quantity alone rather than inventing a huge order", () => {
 		// A step past the cap would raise 100 to 1001.
 		expect(packedMainQuantity(100, [7, 11, 13])).toBe(100)
+	})
+})
+
+/**
+ * The client, 28 September: "The printing always should be same quantity as
+ * the choosen boxes."
+ */
+describe("followerQuantities", () => {
+	const box = (id: string, per: number) => ({
+		id,
+		productId: `p-${id}`,
+		rule: { unitsPerOption: per, countsOptions: [] },
+	})
+	const print = (counts: string[]) => ({
+		id: "print",
+		productId: "p-print",
+		rule: { unitsPerOption: 1, countsOptions: counts.map((c) => `p-${c}`) },
+	})
+
+	it("prints once per box of two", () => {
+		const q = followerQuantities(100, [box("two", 2), print(["one", "two", "four"])])
+		expect(q.get("two")).toBe(50)
+		expect(q.get("print")).toBe(50)
+	})
+
+	it("prints once per box of four", () => {
+		const q = followerQuantities(100, [print(["one", "two", "four"]), box("four", 4)])
+		expect(q.get("four")).toBe(25)
+		expect(q.get("print")).toBe(25)
+	})
+
+	it("prints on every box chosen, adding them up", () => {
+		const q = followerQuantities(100, [box("one", 1), box("four", 4), print(["one", "four"])])
+		expect(q.get("print")).toBe(125)
+	})
+
+	it("ignores boxes it does not print on", () => {
+		const q = followerQuantities(100, [box("metal", 4), print(["one", "two", "four"])])
+		expect(q.get("print")).toBe(0)
+	})
+
+	it("leaves counters out of the pack sizes", () => {
+		expect(packSizesOf([{ unitsPerOption: 4, countsOptions: [] }, { unitsPerOption: 6, countsOptions: ["x"] }])).toEqual([4])
 	})
 })

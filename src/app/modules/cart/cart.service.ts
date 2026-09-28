@@ -21,8 +21,18 @@ import { prisma } from "../../../shared/prisma"
 import { generateToken } from "../../../shared/token"
 import ApiError from "../../errors/ApiError"
 import { GUEST_CART_TTL_DAYS } from "./cart.constant"
-import { applyBundleDiscount, loadBundleDiscounts, loadFollowingLines } from "./bundleDiscount"
-import { followingQuantity, packedMainQuantity } from "../../../domain/bundle/followQuantity"
+import {
+	applyBundleDiscount,
+	followerPackSizes,
+	followerPlan,
+	loadBundleDiscounts,
+	loadFollowingLines,
+} from "./bundleDiscount"
+import {
+	followerQuantities,
+	packedMainQuantity,
+	type FollowRule,
+} from "../../../domain/bundle/followQuantity"
 import { loadExternalTiers, type ExternalTiers } from "../product/tierSources"
 
 const cartInclude = {
@@ -132,7 +142,7 @@ const view = (
 	externalTiers?: (productId: string) => ExternalTiers,
 	stockRules: StockRules = DEFAULT_STOCK_RULES,
 	/** Option lines that follow their parent, and how many units each covers. */
-	following: Map<string, number> = new Map()
+	following: Map<string, FollowRule> = new Map()
 ) => {
 	const lines = cart.items
 		// Option lines are nested under their parent rather than listed flat.
@@ -162,7 +172,10 @@ const view = (
 					followsMain: following.has(i.id),
 					/// How many of the parent one of these covers — 4 for a box of
 					/// four. Only meaningful with `followsMain`.
-					followsPerUnits: following.get(i.id) ?? 1,
+					followsPerUnits: following.get(i.id)?.unitsPerOption ?? 1,
+					/// Counted from the boxes rather than the parent: a print on the box,
+					/// one per box whatever its size.
+					followsBoxes: !!following.get(i.id)?.countsOptions.length,
 					moq,
 					belowMoq: isBelowMoq(i.quantity, moq),
 					// The drawing this line is to be made from. Ordered as the customer
@@ -503,14 +516,35 @@ const addItem = async (
 						optionProductId: variant.productId,
 					},
 				},
-				select: { followsMainQuantity: true, unitsPerOption: true },
+				select: { followsMainQuantity: true, unitsPerOption: true, countsOptionProductIds: true },
 			})
 		: null
 
 	const follows = link?.followsMainQuantity ?? false
 
 	if (follows && parent) {
-		payload = { ...payload, quantity: followingQuantity(parent.quantity, link!.unitsPerOption) }
+		// Counted beside the boxes already under this line, because a print on
+		// the box is one per box — and a print with no box under it is refused.
+		const following = await loadFollowingLines(cart.items)
+		const siblings = cart.items.filter(
+			(i) => i.parentItemId === parent.id && following.has(i.id) && i.variantId !== variant.id
+		)
+		const quantity = followerQuantities(parent.quantity, [
+			...siblings.map((s) => ({ id: s.id, productId: s.variant.productId, rule: following.get(s.id)! })),
+			{
+				id: "",
+				productId: variant.productId,
+				rule: { unitsPerOption: link!.unitsPerOption, countsOptions: link!.countsOptionProductIds },
+			},
+		]).get("")!
+
+		if (quantity === 0) {
+			throw new ApiError(httpStatus.CONFLICT, "This option needs a box to go on", {
+				messageKey: "cart.optionNeedsBox",
+			})
+		}
+
+		payload = { ...payload, quantity }
 	}
 
 	const moq = getEffectiveMoq({ productMoq: variant.product.moq, variantMoq: variant.moq })
@@ -576,12 +610,44 @@ const addItem = async (
 		})
 	}
 
+	// A box added under a line moves the print that counts it.
+	if (parent) await syncFollowers(cart.id, parent.id)
+
 	await prisma.cart.update({
 		where: { id: cart.id },
 		data: { expiresAt: cart.userId ? null : expiryDate() },
 	})
 
 	return { cart: await readAndPrice(cart.id, owner, locale, stockRules), token }
+}
+
+/**
+ * Brings every following option of one line back in step with it.
+ *
+ * Boxes from the line's quantity, prints from the boxes — read fresh, because
+ * it runs after the write that moved them. A print left with no box under it
+ * is removed: it could not be made.
+ */
+const syncFollowers = async (cartId: string, parentId: string) => {
+	const items = await prisma.cartItem.findMany({
+		where: { cartId },
+		select: { id: true, parentItemId: true, quantity: true, variant: { select: { productId: true } } },
+	})
+	const parent = items.find((i) => i.id === parentId)
+	if (!parent) return
+
+	const changes = followerPlan(parentId, parent.quantity, items, await loadFollowingLines(items)).filter(
+		(line) => line.quantity !== line.current
+	)
+	if (!changes.length) return
+
+	await prisma.$transaction(
+		changes.map((line) =>
+			line.quantity === 0
+				? prisma.cartItem.delete({ where: { id: line.id } })
+				: prisma.cartItem.update({ where: { id: line.id }, data: { quantity: line.quantity } })
+		)
+	)
 }
 
 const updateItem = async (
@@ -602,6 +668,8 @@ const updateItem = async (
 	// Quantity 0 means remove — the usual meaning of typing 0 into a cart field.
 	if (quantity === 0) {
 		await prisma.cartItem.delete({ where: { id: itemId } })
+		// A box gone takes its prints down with it.
+		if (item.parentItemId) await syncFollowers(cart.id, item.parentItemId)
 		return { cart: await readAndPrice(cart.id, owner, locale), token, adjusted: false }
 	}
 
@@ -613,14 +681,7 @@ const updateItem = async (
 	 * choice; ordering a different number of it is not.
 	 */
 	if (following.has(item.id)) {
-		const parent = cart.items.find((i) => i.id === item.parentItemId)
-		const wanted = parent
-			? followingQuantity(parent.quantity, following.get(item.id) ?? 1)
-			: item.quantity
-
-		if (wanted !== item.quantity) {
-			await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: wanted } })
-		}
+		if (item.parentItemId) await syncFollowers(cart.id, item.parentItemId)
 		return { cart: await readAndPrice(cart.id, owner, locale), token, adjusted: false }
 	}
 
@@ -643,8 +704,6 @@ const updateItem = async (
 		})
 	}
 
-	const followers = cart.items.filter((i) => i.parentItemId === item.id && following.has(i.id))
-
 	/*
 	 * Raised again, to fill whole packs.
 	 *
@@ -653,24 +712,15 @@ const updateItem = async (
 	 * configurator applies, applied again here because the cart is the other
 	 * place the quantity can be changed.
 	 */
-	const packed = packedMainQuantity(
-		finalQuantity,
-		followers.map((follower) => following.get(follower.id) ?? 1)
-	)
+	const packed = packedMainQuantity(finalQuantity, followerPackSizes(item.id, cart.items, following))
 
-	await prisma.$transaction([
-		prisma.cartItem.update({ where: { id: itemId }, data: { quantity: packed } }),
-		// Options that follow this line move with it — one for one, or one per
-		// box of four. Their stock and minimum are reported on the cart rather
-		// than refused here: the main line is what the customer changed, and
-		// refusing it for an option would read wrong.
-		...followers.map((follower) =>
-			prisma.cartItem.update({
-				where: { id: follower.id },
-				data: { quantity: followingQuantity(packed, following.get(follower.id) ?? 1) },
-			})
-		),
-	])
+	await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: packed } })
+
+	// Options that follow this line move with it — one for one, one per box of
+	// four, a print per box. Their stock and minimum are reported on the cart
+	// rather than refused here: the main line is what the customer changed, and
+	// refusing it for an option would read wrong.
+	await syncFollowers(cart.id, item.id)
 
 	// "Raised" covers both reasons: the minimum, and filling whole packs.
 	return {
@@ -692,6 +742,8 @@ const removeItem = async (owner: CartOwner, itemId: string, locale: LocaleCode) 
 
 	// Option lines cascade with their parent (§4.6) — the database FK handles it.
 	await prisma.cartItem.delete({ where: { id: itemId } })
+	// A box removed takes its prints down with it.
+	if (item.parentItemId) await syncFollowers(cart.id, item.parentItemId)
 
 	return { cart: await readAndPrice(cart.id, owner, locale), token }
 }
