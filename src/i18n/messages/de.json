@@ -309,6 +309,7 @@
 	"newsletter.confirmed": "Vielen Dank, Ihre Anmeldung ist bestätigt.",
 	"newsletter.unsubscribed": "Sie wurden abgemeldet.",
 	"newsletter.invalidToken": "Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.",
+	"newsletter.notFound": "Dieser Abonnent existiert nicht.",
 	"newsletter.confirm.subject": "Bitte bestätigen Sie Ihre Newsletter-Anmeldung",
 	"newsletter.confirm.title": "Anmeldung bestätigen",
 	"newsletter.confirm.intro": "Hallo {name}, bitte bestätigen Sie, dass Sie unseren Newsletter erhalten möchten.",

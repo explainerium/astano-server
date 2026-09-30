@@ -21,6 +21,7 @@ import { logger } from "../shared/logger"
 const PATHS = {
 	verifyEmail: { en: "/verify-email", de: "/e-mail-bestaetigen" },
 	resetPassword: { en: "/reset-password", de: "/passwort-zuruecksetzen" },
+	newsletterConfirm: { en: "/newsletter/confirm", de: "/newsletter/bestaetigen" },
 } as const
 
 export type ShopPage = keyof typeof PATHS

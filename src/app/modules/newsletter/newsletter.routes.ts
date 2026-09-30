@@ -58,6 +58,37 @@ NewsletterRoutes.get(
 	})
 )
 
+/*
+ * CleverReach's webhook: somebody left the list from one of its mails.
+ *
+ * Public, because CleverReach is the caller — the call token in
+ * `X-CR-Calltoken` is the authorisation, checked in the service. No rate
+ * limit: a mailing can bring a burst of unsubscribes, and a limited one would
+ * be dropped.
+ *
+ * GET is CleverReach checking the URL while the hook is registered, and wants
+ * a plain-text echo, not the usual JSON envelope.
+ */
+NewsletterRoutes.get(
+	"/cleverreach/hook",
+	catchAsync(async (req, res) => {
+		const answer = await NewsletterService.answerHookVerification(String(req.query.secret ?? ""))
+		if (!answer) {
+			res.status(httpStatus.NOT_FOUND).type("text/plain").send("")
+			return
+		}
+		res.status(httpStatus.OK).type("text/plain").send(answer)
+	})
+)
+
+NewsletterRoutes.post(
+	"/cleverreach/hook",
+	catchAsync(async (req, res) => {
+		const accepted = await NewsletterService.handleCleverReachHook(req.get("x-cr-calltoken"), req.body)
+		res.status(accepted ? httpStatus.OK : httpStatus.UNAUTHORIZED).type("text/plain").send("")
+	})
+)
+
 export const AdminNewsletterRoutes = Router()
 
 AdminNewsletterRoutes.use(auth("ADMIN", "SHOP_MANAGER"))
@@ -78,6 +109,80 @@ AdminNewsletterRoutes.get(
 			message: t("common.ok", req.locale),
 			data: result.data,
 			meta: result.meta,
+		})
+	})
+)
+
+AdminNewsletterRoutes.get(
+	"/counts",
+	catchAsync(async (req, res) => {
+		sendResponse(res, {
+			statusCode: httpStatus.OK,
+			message: t("common.ok", req.locale),
+			data: await NewsletterService.counts(),
+		})
+	})
+)
+
+AdminNewsletterRoutes.post(
+	"/:id/unsubscribe",
+	writeLimiter,
+	catchAsync(async (req, res) => {
+		sendResponse(res, {
+			statusCode: httpStatus.OK,
+			message: t("newsletter.unsubscribed", req.locale),
+			data: await NewsletterService.adminUnsubscribe(String(req.params.id)),
+		})
+	})
+)
+
+/*
+ * CleverReach, from the settings screen: whether it is set up, a login test
+ * that lists the groups, and "send what is waiting". Staff only, like the list.
+ */
+AdminNewsletterRoutes.get(
+	"/cleverreach",
+	catchAsync(async (req, res) => {
+		sendResponse(res, {
+			statusCode: httpStatus.OK,
+			message: t("common.ok", req.locale),
+			data: await NewsletterService.cleverReachStatus(),
+		})
+	})
+)
+
+AdminNewsletterRoutes.post(
+	"/cleverreach/test",
+	writeLimiter,
+	catchAsync(async (req, res) => {
+		sendResponse(res, {
+			statusCode: httpStatus.OK,
+			message: t("common.ok", req.locale),
+			data: await NewsletterService.testCleverReach(),
+		})
+	})
+)
+
+AdminNewsletterRoutes.post(
+	"/cleverreach/webhook",
+	writeLimiter,
+	catchAsync(async (req, res) => {
+		sendResponse(res, {
+			statusCode: httpStatus.OK,
+			message: t("common.ok", req.locale),
+			data: await NewsletterService.connectCleverReachHook(),
+		})
+	})
+)
+
+AdminNewsletterRoutes.post(
+	"/cleverreach/sync",
+	writeLimiter,
+	catchAsync(async (req, res) => {
+		sendResponse(res, {
+			statusCode: httpStatus.OK,
+			message: t("common.ok", req.locale),
+			data: await NewsletterService.syncCleverReach(),
 		})
 	})
 )

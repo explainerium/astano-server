@@ -15,7 +15,10 @@ const list: RequestHandler = catchAsync(async (req, res) => {
 			settings: await SettingService.getAll(),
 			// The registry, so the screen renders each setting as the control it
 			// deserves instead of a text box holding "true".
-			definitions: SettingService.SETTINGS,
+			// Less the server's own bookkeeping, which has no field to show.
+			definitions: Object.fromEntries(
+				Object.entries(SettingService.SETTINGS).filter(([, definition]) => !definition.internal)
+			),
 			groups: SettingService.SETTING_GROUPS,
 			// The menu's sections, in order. Sent rather than hardcoded on the
 			// screen, so moving a group between them is one edit here.

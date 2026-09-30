@@ -309,6 +309,7 @@
 	"newsletter.confirmed": "Thank you, your subscription is confirmed.",
 	"newsletter.unsubscribed": "You have been unsubscribed.",
 	"newsletter.invalidToken": "That confirmation link is not valid or has already been used.",
+	"newsletter.notFound": "That subscriber does not exist.",
 	"newsletter.confirm.subject": "Please confirm your newsletter subscription",
 	"newsletter.confirm.title": "Confirm your subscription",
 	"newsletter.confirm.intro": "Hello {name}, please confirm you would like to receive our newsletter.",

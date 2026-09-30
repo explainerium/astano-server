@@ -46,6 +46,15 @@ export interface SettingDefinition {
 	 * The help text must say so too — the admin cannot read this file.
 	 */
 	pending?: boolean
+	/**
+	 * Written by the server for its own use, never by a person.
+	 *
+	 * Left out of the definitions the settings screen renders, so it has no
+	 * field — but still declared here, so a `password` one is sealed and
+	 * masked like any other credential rather than sitting in the table as
+	 * plain text.
+	 */
+	internal?: boolean
 	label: string
 	/** Shown under the field. Say what it changes, not what it is. */
 	help?: string
@@ -167,6 +176,13 @@ export const SETTING_GROUPS: {
 		key: "email",
 		title: "Appearance",
 		blurb: "The logo, colours and footer on every message the shop sends.",
+		section: "email",
+	},
+	{
+		key: "cleverreach",
+		title: "CleverReach",
+		blurb:
+			"Where confirmed newsletter subscribers are sent. The shop keeps its own list either way; this copies it into CleverReach for mailings.",
 		section: "email",
 	},
 ]
@@ -340,6 +356,95 @@ export const SETTINGS: Record<string, SettingDefinition> = {
 		type: "text",
 		fallback: "",
 		group: "ai",
+	},
+
+	// ── CleverReach ────────────────────────────────────────────────────────
+	/*
+	 * The newsletter tool the client mails from.
+	 *
+	 * The shop runs the double opt-in itself and keeps the list; CleverReach
+	 * receives an address only once it is confirmed, and hears about an
+	 * unsubscribe the same way. Credentials here rather than in the
+	 * environment, like SMTP and the AI key: the account is the client's, and
+	 * they should be able to repoint or revoke it without a deployment.
+	 */
+	"cleverreach.enabled": {
+		label: "Send subscribers to CleverReach",
+		help: "Off: the shop still collects and confirms subscribers, and nothing leaves it.",
+		type: "boolean",
+		fallback: false,
+		group: "cleverreach",
+	},
+	"cleverreach.clientId": {
+		label: "Client ID",
+		/*
+		 * Two different things in CleverReach are called "Client ID": the
+		 * customer number on the login screen, and the one an API app gets. Only
+		 * the second works here, and the first fails with the same "invalid
+		 * client" as a typo.
+		 */
+		help: "From CleverReach → Account → Extras → REST API → your app. Not the customer number you log in with.",
+		type: "text",
+		fallback: "",
+		group: "cleverreach",
+	},
+	"cleverreach.clientSecret": {
+		label: "Client Secret",
+		help: "From the same app. Stored encrypted; it is never shown again. Leave empty to keep the current one.",
+		type: "password",
+		fallback: "",
+		group: "cleverreach",
+	},
+	"cleverreach.groupId": {
+		label: "Group ID",
+		help: "The CleverReach list subscribers go into. Use “Test connection” below to see your groups and pick one.",
+		type: "text",
+		fallback: "",
+		group: "cleverreach",
+	},
+
+	/*
+	 * The webhook CleverReach calls when somebody unsubscribes from one of its
+	 * mails. Set by "Connect webhook" on the settings screen, never typed.
+	 *
+	 * `webhookVerify` is ours: CleverReach sends it back once while registering,
+	 * to prove the URL is ours. `webhookCallToken` is theirs: it arrives on every
+	 * call, to prove the call is theirs. `webhookGroupId` is the group it was
+	 * registered for, so changing the group can say the hook needs reconnecting.
+	 */
+	"cleverreach.webhookVerify": {
+		internal: true,
+		label: "Webhook verify token",
+		type: "password",
+		fallback: "",
+		group: "cleverreach",
+	},
+	"cleverreach.webhookCallToken": {
+		internal: true,
+		label: "Webhook call token",
+		type: "password",
+		fallback: "",
+		group: "cleverreach",
+	},
+	/*
+	 * The group every `syncedAt` in the subscriber table refers to. When the
+	 * group in use differs — somebody moved from a test list to the real one —
+	 * every mark is cleared, so the whole list goes to the new group rather than
+	 * only whoever signs up next.
+	 */
+	"cleverreach.syncedGroupId": {
+		internal: true,
+		label: "Group the subscribers were sent to",
+		type: "text",
+		fallback: "",
+		group: "cleverreach",
+	},
+	"cleverreach.webhookGroupId": {
+		internal: true,
+		label: "Webhook group",
+		type: "text",
+		fallback: "",
+		group: "cleverreach",
 	},
 
 	// ── Mail server ────────────────────────────────────────────────────────
