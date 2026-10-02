@@ -1,9 +1,10 @@
 import type { Prisma } from "@prisma/client"
-import { DEFAULT_LOCALE, type LocaleCode } from "../../../config/locales"
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, type LocaleCode } from "../../../config/locales"
+import { sameLabel, uniqueValueCode } from "../../../domain/product/attributeValueCode"
 import { copyCode, copyNameFor } from "../../../shared/duplicate"
 import { httpStatus } from "../../../shared/httpStatus"
 import { prisma } from "../../../shared/prisma"
-import { uniqueSlug } from "../../../shared/slugify"
+import { slugify, uniqueSlug } from "../../../shared/slugify"
 import ApiError from "../../errors/ApiError"
 
 const include = {
@@ -292,7 +293,75 @@ const adminGetById = async (id: string): Promise<AdminAttributeView> => {
 	return adminView(row)
 }
 
+/**
+ * A value typed straight into a product's Attributes tab.
+ *
+ * The client, 1 October: "Is it possible to make also a free text for the
+ * product attributes, not only choosing from the list?" The value still
+ * joins the attribute's list rather than living on the one product, so the
+ * next product finds it there and it can still build variants.
+ *
+ * The same label in every language for now — the dashboard has one box, and
+ * the English can be corrected under Attributes. A label the attribute already
+ * has, in any language and any case, returns that value instead of a twin.
+ */
+const addValue = async (attributeId: string, label: string) => {
+	const attribute = await prisma.attribute.findUnique({ where: { id: attributeId }, include })
+
+	if (!attribute) {
+		throw new ApiError(httpStatus.NOT_FOUND, "Attribute not found", {
+			messageKey: "attribute.notFound",
+		})
+	}
+
+	const text = label.trim().replace(/\s+/g, " ")
+	const existing = attribute.values.find((v) => v.translations.some((tr) => sameLabel(tr.label, text)))
+	if (existing) return { id: existing.id, code: existing.code, label: text, created: false }
+
+	const created = await prisma.attributeValue.create({
+		data: {
+			attributeId,
+			code: uniqueValueCode(slugify(text, DEFAULT_LOCALE), attribute.values.map((v) => v.code)),
+			sortOrder: Math.max(-1, ...attribute.values.map((v) => v.sortOrder)) + 1,
+			translations: {
+				create: SUPPORTED_LOCALES.map((locale) => ({ locale, label: text })),
+			},
+		},
+	})
+
+	return { id: created.id, code: created.code, label: text, created: true }
+}
+
+/**
+ * An attribute typed into a product's Attributes tab, by name alone.
+ *
+ * The full form under Attributes asks for a code, which is a word only an
+ * importer cares about; from a product the name is enough and the code is made
+ * from it. A name already in use, in any language, returns that attribute
+ * instead of a second "Material".
+ */
+const addByName = async (name: string, locale: LocaleCode) => {
+	const text = name.trim().replace(/\s+/g, " ")
+	const all = await prisma.attribute.findMany({ include })
+
+	const existing = all.find((a) => a.translations.some((tr) => sameLabel(tr.name, text)))
+	if (existing) return { ...view(existing, locale), created: false }
+
+	const row = await prisma.attribute.create({
+		data: {
+			code: uniqueValueCode(slugify(text, DEFAULT_LOCALE), all.map((a) => a.code), "merkmal"),
+			sortOrder: Math.max(-1, ...all.map((a) => a.sortOrder)) + 1,
+			translations: { create: SUPPORTED_LOCALES.map((l) => ({ locale: l, name: text })) },
+		},
+		include,
+	})
+
+	return { ...view(row, locale), created: true }
+}
+
 export const AttributeService = {
+	addValue,
+	addByName,
 	list,
 	getById,
 	create,

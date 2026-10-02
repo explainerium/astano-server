@@ -26,6 +26,15 @@ router.post(
 	AttributeController.create
 )
 
+// An attribute typed into a product by name; the code is made from it.
+// Registered before "/:id/…" routes only by habit — the paths cannot collide.
+router.post(
+	"/quick",
+	auth("ADMIN", "SHOP_MANAGER"),
+	validateRequest(AttributeValidation.addByNameSchema),
+	AttributeController.addByName
+)
+
 // POST, not PATCH: it creates a new attribute, values and all. No body —
 // everything the copy needs is already on the original.
 router.post(
@@ -33,6 +42,15 @@ router.post(
 	auth("ADMIN", "SHOP_MANAGER"),
 	validateRequest(AttributeValidation.attributeIdSchema),
 	AttributeController.duplicate
+)
+
+// A value typed into a product's Attributes tab rather than picked from the
+// list. Joins the list, so the next product finds it.
+router.post(
+	"/:id/values",
+	auth("ADMIN", "SHOP_MANAGER"),
+	validateRequest(AttributeValidation.addValueSchema),
+	AttributeController.addValue
 )
 
 router.patch(

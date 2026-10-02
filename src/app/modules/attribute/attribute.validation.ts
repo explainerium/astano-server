@@ -40,7 +40,20 @@ export const attributeIdSchema = z.object({
 	params: z.object({ id: z.string().uuid() }),
 })
 
+/** One value typed into a product: just the words. */
+export const addValueSchema = z.object({
+	params: z.object({ id: z.string().uuid() }),
+	body: z.object({ label: z.string().trim().min(1).max(200) }),
+})
+
+/** An attribute typed into a product: just its name. */
+export const addByNameSchema = z.object({
+	body: z.object({ name: z.string().trim().min(1).max(200) }),
+})
+
 export const AttributeValidation = {
+	addValueSchema,
+	addByNameSchema,
 	createAttributeSchema,
 	updateAttributeSchema,
 	attributeIdSchema,

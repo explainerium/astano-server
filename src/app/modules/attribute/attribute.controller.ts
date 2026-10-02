@@ -51,6 +51,26 @@ const remove: RequestHandler = catchAsync(async (req, res) => {
 	sendResponse(res, { statusCode: httpStatus.OK, message: t("attribute.deleted", req.locale) })
 })
 
+/** 201 when it is new, 200 when the attribute already had it. */
+const addValue: RequestHandler = catchAsync(async (req, res) => {
+	const value = await AttributeService.addValue(req.params.id as string, req.body.label)
+	sendResponse(res, {
+		statusCode: value.created ? httpStatus.CREATED : httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: value,
+	})
+})
+
+/** 201 when it is new, 200 when an attribute of that name already existed. */
+const addByName: RequestHandler = catchAsync(async (req, res) => {
+	const attribute = await AttributeService.addByName(req.body.name, req.locale)
+	sendResponse(res, {
+		statusCode: attribute.created ? httpStatus.CREATED : httpStatus.OK,
+		message: t("common.ok", req.locale),
+		data: attribute,
+	})
+})
+
 const removeValue: RequestHandler = catchAsync(async (req, res) => {
 	await AttributeService.removeValue(req.params.id as string)
 	sendResponse(res, { statusCode: httpStatus.OK, message: t("attribute.valueDeleted", req.locale) })
@@ -74,6 +94,8 @@ const adminGetById: RequestHandler = catchAsync(async (req, res) => {
 })
 
 export const AttributeController = {
+	addValue,
+	addByName,
 	list,
 	getById,
 	create,
