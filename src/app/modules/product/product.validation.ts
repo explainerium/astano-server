@@ -165,14 +165,32 @@ const variantPatch = z.object({
  * state unrepresentable: the same attribute cannot arrive twice with
  * contradictory flags.
  */
-const productAttribute = z.object({
-	attributeId: z.string().uuid(),
-	attributeValueIds: z.array(z.string().uuid()).min(1),
-	/// Shown in the specification table on the product page.
-	isVisible: z.boolean().default(true),
-	/// This attribute splits *this* product into variants.
-	isVariation: z.boolean().default(false),
-})
+const productAttribute = z
+	.object({
+		attributeId: z.string().uuid(),
+		attributeValueIds: z.array(z.string().uuid()).default([]),
+		/**
+		 * Free text for this product alone, per language — instead of values
+		 * from the attribute's list. See ProductAttributeText. German is enough;
+		 * the storefront falls back to it.
+		 */
+		text: z
+			.array(z.object({ locale, value: z.string().trim().max(500) }))
+			.optional(),
+		/// Shown in the specification table on the product page.
+		isVisible: z.boolean().default(true),
+		/// This attribute splits *this* product into variants.
+		isVariation: z.boolean().default(false),
+	})
+	.refine((a) => (a.text ? a.text.some((t) => t.value) : a.attributeValueIds.length > 0), {
+		message: "Choose at least one value, or type one",
+		path: ["attributeValueIds"],
+	})
+	// Variants are built from shared values; text on one product has nothing to match.
+	.refine((a) => !(a.text && a.isVariation), {
+		message: "A typed value cannot build variants",
+		path: ["isVariation"],
+	})
 
 /** Direct option assignment — no bundle entity to create first. */
 const option = z.object({

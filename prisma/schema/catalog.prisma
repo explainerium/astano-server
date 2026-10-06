@@ -195,6 +195,8 @@ model Product {
   variants     ProductVariant[]
   assets       ProductAsset[]
   attributes   ProductAttribute[]
+  /// Attribute values typed for this product alone — see ProductAttributeText.
+  attributeTexts ProductAttributeText[]
   prices       ProductPrice[]
   priceTiers   ProductPriceTier[]
   tabs         ProductTab[]
@@ -409,9 +411,15 @@ model Attribute {
   code      String  @unique
   sortOrder Int     @default(0)
 
+  /// The product form starts this attribute as free text rather than a list —
+  /// "Abmessungen", where nearly every product has its own. A default only:
+  /// each product can still switch.
+  freeText Boolean @default(false)
+
   translations AttributeTranslation[]
   values       AttributeValue[]
   products     ProductAttribute[]
+  productTexts ProductAttributeText[]
 
   @@map("attributes")
 }
@@ -478,6 +486,46 @@ model ProductAttribute {
   @@id([productId, attributeId, attributeValueId])
   @@index([attributeId])
   @@map("product_attributes")
+}
+
+/// An attribute whose value belongs to one product only.
+///
+/// The client, 6 October: "Abmessungen" — 600 products, nearly every one its
+/// own size. As a list value each would be saved for every other product to
+/// scroll past and never use. Here it is text on the product: nothing joins
+/// the attribute's list, and a mistake is corrected in place.
+///
+/// A table of its own rather than a nullable value on ProductAttribute, whose
+/// key includes the value. It shows in the specification table like any
+/// attribute; it cannot build variants or feed a storefront filter, because
+/// both need a shared value to match on.
+model ProductAttributeText {
+  id          String    @id @default(uuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attributeId String
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  /// Shown in the specification table on the product page.
+  isVisible Boolean @default(true)
+
+  translations ProductAttributeTextTranslation[]
+
+  @@unique([productId, attributeId])
+  @@index([attributeId])
+  @@map("product_attribute_texts")
+}
+
+model ProductAttributeTextTranslation {
+  id     String               @id @default(uuid())
+  textId String
+  text   ProductAttributeText @relation(fields: [textId], references: [id], onDelete: Cascade)
+
+  locale String
+  value  String
+
+  @@unique([textId, locale])
+  @@map("product_attribute_text_translations")
 }
 
 model VariantAttributeValue {

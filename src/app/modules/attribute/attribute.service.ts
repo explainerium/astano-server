@@ -23,6 +23,7 @@ const view = (row: AttributeRow, locale: LocaleCode) => ({
 	id: row.id,
 	code: row.code,
 	sortOrder: row.sortOrder,
+	freeText: row.freeText,
 	name: pick(row.translations, locale)?.name ?? row.code,
 	values: row.values.map((v) => ({
 		id: v.id,
@@ -53,28 +54,54 @@ const getById = async (id: string, locale: LocaleCode) => {
 
 interface ValueInput {
 	id?: string
-	code: string
+	/** Made from the German label when absent. See `codeFromLabels`. */
+	code?: string
 	sortOrder?: number
 	translations: { locale: string; label: string }[]
 }
 
+/** The German text first, as the codes typed into a product are made, then any language. */
+const germanFirst = <T extends { locale: string }>(rows: T[]): T | undefined =>
+	rows.find((r) => r.locale === DEFAULT_LOCALE) ?? rows[0]
+
+/**
+ * A code for a value the form sent without one, unique among `taken` — which
+ * the caller grows as it goes, so two new values in one save that slug the
+ * same still get two codes.
+ */
+const codeFromLabels = (value: ValueInput, taken: Set<string>): string => {
+	const code =
+		value.code ?? uniqueValueCode(slugify(germanFirst(value.translations)?.label ?? "", DEFAULT_LOCALE), taken)
+	taken.add(code)
+	return code
+}
+
 const create = async (
 	payload: {
-		code: string
+		code?: string
 		sortOrder?: number
+		freeText?: boolean
 		translations: { locale: string; name: string }[]
 		values?: ValueInput[]
 	},
 	locale: LocaleCode
 ) => {
+	const code =
+		payload.code ??
+		(await uniqueSlug(slugify(germanFirst(payload.translations)?.name ?? "", DEFAULT_LOCALE) || "merkmal", async (candidate) =>
+			Boolean(await prisma.attribute.findUnique({ where: { code: candidate }, select: { id: true } }))
+		))
+	const taken = new Set((payload.values ?? []).flatMap((v) => (v.code ? [v.code] : [])))
+
 	const row = await prisma.attribute.create({
 		data: {
-			code: payload.code,
+			code,
 			sortOrder: payload.sortOrder ?? 0,
+			freeText: payload.freeText ?? false,
 			translations: { create: payload.translations },
 			values: {
 				create: (payload.values ?? []).map((v) => ({
-					code: v.code,
+					code: codeFromLabels(v, taken),
 					sortOrder: v.sortOrder ?? 0,
 					translations: { create: v.translations },
 				})),
@@ -91,6 +118,7 @@ const update = async (
 	payload: {
 		code?: string
 		sortOrder?: number
+		freeText?: boolean
 		translations?: { locale: string; name: string }[]
 		values?: ValueInput[]
 	},
@@ -109,6 +137,7 @@ const update = async (
 			data: {
 				...(payload.code !== undefined ? { code: payload.code } : {}),
 				...(payload.sortOrder !== undefined ? { sortOrder: payload.sortOrder } : {}),
+				...(payload.freeText !== undefined ? { freeText: payload.freeText } : {}),
 			},
 		})
 
@@ -123,14 +152,21 @@ const update = async (
 		// Values are upserted rather than replaced. Deleting and recreating them
 		// would cascade through variant_attribute_values and silently detach every
 		// variant that used them.
+		// A value already saved keeps its code unless one is sent: the storefront's
+		// filter links carry it, and renaming a label must not break them.
+		const taken = new Set([
+			...existing.values.map((v) => v.code),
+			...(payload.values ?? []).flatMap((v) => (v.code ? [v.code] : [])),
+		])
+
 		for (const v of payload.values ?? []) {
 			const valueId = v.id
 				? (await tx.attributeValue.update({
 						where: { id: v.id },
-						data: { code: v.code, sortOrder: v.sortOrder ?? 0 },
+						data: { ...(v.code ? { code: v.code } : {}), sortOrder: v.sortOrder ?? 0 },
 					})).id
 				: (await tx.attributeValue.create({
-						data: { attributeId: id, code: v.code, sortOrder: v.sortOrder ?? 0 },
+						data: { attributeId: id, code: codeFromLabels(v, taken), sortOrder: v.sortOrder ?? 0 },
 					})).id
 
 			for (const t of v.translations) {
@@ -182,6 +218,7 @@ const duplicate = async (id: string, locale: LocaleCode) => {
 		{
 			code,
 			sortOrder: row.sortOrder,
+			freeText: row.freeText,
 			translations: row.translations.map((t) => ({
 				locale: t.locale,
 				name: copyNameFor(t.name, t.locale),
@@ -256,6 +293,8 @@ export interface AdminAttributeView {
 	id: string
 	code: string
 	sortOrder: number
+	/** Products start this attribute as typed text rather than a list. */
+	freeText: boolean
 	translations: { locale: string; name: string }[]
 	values: {
 		id: string
@@ -269,6 +308,7 @@ const adminView = (row: AttributeRow): AdminAttributeView => ({
 	id: row.id,
 	code: row.code,
 	sortOrder: row.sortOrder,
+	freeText: row.freeText,
 	translations: row.translations.map((t) => ({ locale: t.locale, name: t.name })),
 	values: row.values.map((v) => ({
 		id: v.id,

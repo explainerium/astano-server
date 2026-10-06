@@ -74,6 +74,10 @@ const detailInclude = {
 			attributeValue: { include: { translations: true } },
 		},
 	},
+	// Values typed for this product alone. See ProductAttributeText.
+	attributeTexts: {
+		include: { attribute: { include: { translations: true } }, translations: true },
+	},
 	prices: true,
 	priceTiers: true,
 	assets: { include: { asset: true }, orderBy: { sortOrder: "asc" } },
@@ -308,6 +312,15 @@ const toPublicProduct = (
 					return map.set(a.attributeId, entry)
 				}, new Map<string, { id: string; name: string; values: string[] }>())
 				.values(),
+			// Typed for this product alone, shown the same way.
+			...row.attributeTexts
+				.filter((a) => a.isVisible)
+				.flatMap((a) => {
+					const value = pickTranslation(a.translations, locale)?.value
+					if (!value) return []
+					const name = pickTranslation(a.attribute.translations, locale)?.name ?? a.attribute.code
+					return [{ id: a.attributeId, name, values: [value] }]
+				}),
 		],
 
 		quoteOnly: row.quoteEnabled,
@@ -586,8 +599,9 @@ const toAdminProduct = (row: ProductDetail, locale: LocaleCode) => {
 					}
 					entry.attributeValueIds.push(a.attributeValueId)
 					return map.set(a.attributeId, entry)
-				}, new Map<string, { attributeId: string; attributeValueIds: string[]; isVisible: boolean; isVariation: boolean }>())
+				}, new Map<string, AttributeInput>())
 				.values(),
+			...row.attributeTexts.map(textToInput),
 		],
 		prices: row.prices,
 		tiers: row.priceTiers,
@@ -1155,9 +1169,44 @@ const setTopProducts = async (ids: string[], locale: LocaleCode) => {
 interface AttributeInput {
 	attributeId: string
 	attributeValueIds: string[]
+	/** Typed for this product alone, instead of values from the list. */
+	text?: { locale: string; value: string }[]
 	isVisible?: boolean
 	isVariation?: boolean
 }
+
+/** A stored text row in the payload's shape, for the editor and for a duplicate. */
+const textToInput = (row: {
+	attributeId: string
+	isVisible: boolean
+	translations: { locale: string; value: string }[]
+}): AttributeInput => ({
+	attributeId: row.attributeId,
+	attributeValueIds: [],
+	text: row.translations.map((t) => ({ locale: t.locale, value: t.value })),
+	isVisible: row.isVisible,
+	isVariation: false,
+})
+
+/**
+ * The typed attributes, as rows to create: one per attribute, with a
+ * translation per language that has words in it. An attribute sent as text
+ * never also gets list rows — see `expandAttributes`.
+ */
+const textAttributes = (input?: AttributeInput[]) =>
+	(input ?? []).flatMap((attribute) => {
+		const translations = (attribute.text ?? [])
+			.map((t) => ({ locale: t.locale, value: t.value.trim() }))
+			.filter((t) => t.value)
+		if (!attribute.text || !translations.length) return []
+		return [
+			{
+				attributeId: attribute.attributeId,
+				isVisible: attribute.isVisible ?? true,
+				translations: { create: translations },
+			},
+		]
+	})
 
 /**
  * `{ attributeId, values[], flags }` → one row per value.
@@ -1168,7 +1217,7 @@ interface AttributeInput {
  * the first — grouping in the payload is what keeps them consistent.
  */
 const expandAttributes = (input?: AttributeInput[]) =>
-	(input ?? []).flatMap((attribute) =>
+	(input ?? []).filter((attribute) => !attribute.text).flatMap((attribute) =>
 		attribute.attributeValueIds.map((attributeValueId) => ({
 			attributeId: attribute.attributeId,
 			attributeValueId,
@@ -1379,6 +1428,7 @@ const create = async (payload: any, locale: LocaleCode, createdById?: string) =>
 			// One row per selected value; the flags belong to the attribute, so
 			// every row of an attribute carries the same pair.
 			attributes: { create: expandAttributes(payload.attributes) },
+			attributeTexts: { create: textAttributes(payload.attributes) },
 			prices: { create: payload.prices ?? [] },
 			priceTiers: { create: payload.tiers ?? [] },
 			options: {
@@ -1507,6 +1557,7 @@ const duplicate = async (id: string, locale: LocaleCode, createdById?: string) =
 						return map.set(a.attributeId, entry)
 					}, new Map<string, AttributeInput>())
 					.values(),
+				...row.attributeTexts.map(textToInput),
 			],
 
 			prices: row.prices.map(stripPriceRow),
@@ -1615,6 +1666,12 @@ const update = async (id: string, payload: any, locale: LocaleCode) => {
 			await tx.productAttribute.createMany({
 				data: expandAttributes(payload.attributes).map((row) => ({ ...row, productId: id })),
 			})
+
+			// The typed ones too — the payload is the whole set either way.
+			await tx.productAttributeText.deleteMany({ where: { productId: id } })
+			for (const text of textAttributes(payload.attributes)) {
+				await tx.productAttributeText.create({ data: { ...text, productId: id } })
+			}
 		}
 
 		if (payload.categoryIds) {
